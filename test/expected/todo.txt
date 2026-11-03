@@ -1,0 +1,15 @@
+-- exit 0
+-- app
+<html><head><title>Todo</title><style>
+            body { margin: 0; padding: 32px 16px; background: #101014; color: #f2f2ee; font-family: system-ui, sans-serif; }
+            main { max-width: 420px; margin: 0 auto; }
+            h1 { margin: 0 0 16px; font-size: 26px; }
+            form, .add { display: flex; gap: 8px; margin-bottom: 14px; }
+            input[type=text] { flex: 1; font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid #2c2c35; background: #18181e; color: inherit; }
+            button { font: inherit; border: 0; border-radius: 10px; padding: 0 14px; background: #d4ff3a; color: #111; font-weight: 700; cursor: pointer; }
+            ul { list-style: none; padding: 0; margin: 0; }
+            li { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 10px; background: #18181e; margin-bottom: 6px; }
+            li.done label { color: #777; text-decoration: line-through; }
+            li .x { background: none; color: #888; font-size: 18px; padding: 0 6px; }
+            .summary { color: #888; font-size: 13px; }
+        </style></head><body><main><h1>Todo</h1><div class="add"><input id="draft" type="text" placeholder="Add a task" value=""><button>Add</button></div><ul><li><label><input type="checkbox"> Try the playground</label><button class="x" title="remove">×</button></li><li class="done"><label><input type="checkbox" checked=""> Read the docs</label><button class="x" title="remove">×</button></li><li><label><input type="checkbox"> Install Flywheel</label><button class="x" title="remove">×</button></li></ul><p class="summary">2 of 3 left</p></main></body></html>

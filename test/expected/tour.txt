@@ -1,0 +1,6 @@
+3.14159 Small
+16 Large
+0 5 3 true
+generic
+<ul><li>3.14159</li><li>16</li></ul>
+-- exit 0

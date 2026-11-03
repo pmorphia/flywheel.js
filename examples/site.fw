@@ -1,0 +1,46 @@
+# Components take attributes; web.serve shows the page for "/" in the preview.
+import html.*
+import web
+
+class Release
+    string version
+    string date
+    string[] notes
+end
+
+Release[] releases = [
+    Release("2.3 beta-3", "2026-10", ["Desktop windows on Windows", "Race detector: flywheel run --race"]),
+    Release("2.2", "2026-07", ["Enums with data", "Format specs in interpolation"]),
+    Release("2.1", "2026-04", ["Generic methods", "SQLite built in"])
+]
+
+component Card = <article class="card">
+    <header><h2>{attr release.version}</h2><time>{attr release.date}</time></header>
+    <ul>{attr release.notes.map(function(string n) => <li>{n}</li>)}</ul>
+    {attr inner}
+</article>
+
+function index() returns element
+    return <html>
+        <head>
+            <title>Changelog</title>
+            <style>
+                body { margin: 0; padding: 28px 20px; font-family: Georgia, serif; background: #faf8f2; color: #1d1d1b; }
+                h1 { font-size: 30px; margin: 0 0 18px; }
+                .card { background: white; border: 1px solid #e6e2d6; border-radius: 12px; padding: 14px 18px; margin-bottom: 12px; }
+                .card header { display: flex; justify-content: space-between; align-items: baseline; }
+                .card h2 { font-size: 18px; margin: 0; }
+                time { color: #8a8578; font-size: 13px; }
+                .latest { border-color: #1d1d1b; }
+                .badge { display: inline-block; background: #1d1d1b; color: #d4ff3a; font: 11px ui-monospace, monospace; padding: 2px 8px; border-radius: 99px; }
+            </style>
+        </head>
+        <body>
+            <h1>Flywheel changelog</h1>
+            <Card release={releases[0]}><span class="badge">latest</span></Card>
+            {releases.slice(1).map(function(Release r) => <Card release={r}></Card>)}
+        </body>
+    </html>
+end
+
+print web.serve("/", index, 8000)

@@ -1,0 +1,52 @@
+# An app: the program returns an element tree, and the buttons call Flywheel
+# functions. After every event the tree re-renders, like `flywheel desktop`.
+import html.*
+
+int count = 0
+var label = <output id="count">0</output>
+
+function change(int by)
+    count += by
+    label.text_content = string(count)
+    if count < 0 then
+        label.add_class("negative")
+    else
+        label.remove_class("negative")
+    end
+end
+
+function increment()
+    change(1)
+end
+
+function decrement()
+    change(-1)
+end
+
+function reset()
+    change(-count)
+end
+
+return <html>
+    <head>
+        <title>Counter</title>
+        <style>
+            body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f4f4ef; font-family: system-ui, sans-serif; color: #111; }
+            main { background: white; border-radius: 18px; padding: 28px 36px; text-align: center; box-shadow: 0 20px 50px -25px rgba(0, 0, 0, .35); }
+            h1 { font-size: 15px; letter-spacing: .2em; text-transform: uppercase; color: #888; margin: 0 0 6px; }
+            output { display: block; font-size: 72px; font-weight: 800; font-variant-numeric: tabular-nums; }
+            output.negative { color: #d33; }
+            button { font: inherit; font-size: 22px; width: 56px; height: 48px; border-radius: 12px; border: 0; background: #111; color: #d4ff3a; cursor: pointer; margin: 0 4px; }
+            button.reset { width: auto; padding: 0 16px; font-size: 14px; background: #e8e8e2; color: #111; }
+        </style>
+    </head>
+    <body>
+        <main>
+            <h1>Counter</h1>
+            {label}
+            <button onclick={decrement}>−</button>
+            <button onclick={increment}>+</button>
+            <button class="reset" onclick={reset}>reset</button>
+        </main>
+    </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "flywheel.js",
+  "version": "2.3.0-beta.3",
+  "description": "The Flywheel language in JavaScript: a browser and Node interpreter for learning and prototyping.",
+  "main": "flywheel.js",
+  "bin": { "flywheel-js": "bin/flywheel-js.js" },
+  "files": ["flywheel.js", "bin/", "examples/"],
+  "scripts": { "test": "node test/run.js" },
+  "repository": { "type": "git", "url": "git+https://github.com/fwlang/flywheel.js.git" },
+  "homepage": "https://flywheel.polymorphia.dev",
+  "keywords": ["flywheel", "interpreter", "programming-language", "playground"],
+  "license": "MIT"
+}

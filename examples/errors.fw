@@ -1,0 +1,53 @@
+# Typed exceptions with finally, and Result<T, E> values.
+class ParseError
+    string message
+    int column
+end
+
+function parse_digit(string text, int column) returns int
+    if text.length != 1 or not ("0" <= text and text <= "9") then
+        throw ParseError("expected a digit, got '{text}'", column)
+    end
+    return int(text)
+end
+
+function sum_digits(string text) returns int
+    int total = 0
+    for i, c in text.chars() do
+        total += parse_digit(string(c), i + 1)
+    end
+    return total
+end
+
+for input in ["1234", "12x4"] do
+    try
+        print input, "->", sum_digits(input)
+    catch ParseError e
+        print input, "-> error at column {e.column}: {e.message}"
+    finally
+        print "  (checked {input})"
+    end
+end
+
+function divide(int n, int d) returns Result<int, string>
+    if d == 0 then
+        return Result.error("division by zero")
+    end
+    return Result.ok(n // d)
+end
+
+for d in [4, 0] do
+    match divide(42, d)
+        case ok value then
+            print "42 // {d} = {value}"
+        case error why then
+            print "42 // {d} failed: {why}"
+    end
+end
+
+try
+    var scores = {"ann": 3}
+    print scores["bo"]
+catch KeyError e
+    print "KeyError:", e.message
+end

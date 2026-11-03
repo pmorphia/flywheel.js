@@ -1,0 +1,8 @@
+1234 -> 10
+  (checked 1234)
+12x4 -> error at column 3: expected a digit, got 'x'
+  (checked 12x4)
+42 // 4 = 10
+42 // 0 failed: division by zero
+KeyError: map key not found
+-- exit 0

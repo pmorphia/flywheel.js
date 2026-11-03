@@ -1,0 +1,51 @@
+import html.*
+
+interface Shape
+    function area() returns double
+end
+
+class Circle implements Shape
+    double radius
+    function area() returns double
+        return 3.14159 * inst radius * inst radius
+    end
+end
+
+class Square implements Shape
+    double side
+    function init(double side)
+        inst side = side
+    end
+    function area() returns double
+        return inst side * inst side
+    end
+end
+
+enum Size
+    Small, Large
+end
+
+function size(Shape shape) returns Size
+    match shape
+        case Circle c if c.radius > 2.0 then
+            return Size.Large
+        case Square s if s.side > 3.0 then
+            return Size.Large
+        else
+            return Size.Small
+    end
+end
+
+class Box<T>
+    T value
+end
+
+Shape[] shapes = [Circle(1.0), Square(4.0)]
+for shape in shapes do
+    print shape.area(), size(shape)
+end
+
+int? best = null
+print best ?? 0, "héllo".length, 7.5 // 2, 1 < 2 < 3
+print Box("generic").value
+print <ul>{shapes.map(function(Shape s) => <li>{s.area()}</li>)}</ul>

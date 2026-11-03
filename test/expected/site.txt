@@ -1,0 +1,13 @@
+http://127.0.0.1:8000/
+-- exit 0
+-- app
+<html><head><title>Changelog</title><style>
+                body { margin: 0; padding: 28px 20px; font-family: Georgia, serif; background: #faf8f2; color: #1d1d1b; }
+                h1 { font-size: 30px; margin: 0 0 18px; }
+                .card { background: white; border: 1px solid #e6e2d6; border-radius: 12px; padding: 14px 18px; margin-bottom: 12px; }
+                .card header { display: flex; justify-content: space-between; align-items: baseline; }
+                .card h2 { font-size: 18px; margin: 0; }
+                time { color: #8a8578; font-size: 13px; }
+                .latest { border-color: #1d1d1b; }
+                .badge { display: inline-block; background: #1d1d1b; color: #d4ff3a; font: 11px ui-monospace, monospace; padding: 2px 8px; border-radius: 99px; }
+            </style></head><body><h1>Flywheel changelog</h1><article class="card"><header><h2>2.3 beta-3</h2><time>2026-10</time></header><ul><li>Desktop windows on Windows</li><li>Race detector: flywheel run --race</li></ul><span class="badge">latest</span></article><article class="card"><header><h2>2.2</h2><time>2026-07</time></header><ul><li>Enums with data</li><li>Format specs in interpolation</li></ul></article><article class="card"><header><h2>2.1</h2><time>2026-04</time></header><ul><li>Generic methods</li><li>SQLite built in</li></ul></article></body></html>

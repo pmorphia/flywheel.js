@@ -1,0 +1,86 @@
+# A todo list. Handlers receive the input's value when they take a string.
+import html.*
+
+class Task
+    string title
+    bool done = false
+end
+
+Task[] tasks = [Task("Try the playground"), Task("Read the docs", true), Task("Install Flywheel")]
+string draft = ""
+var list = <ul></ul>
+var summary = <p class="summary"></p>
+
+function toggler(Task task) returns function() returns void
+    return function() returns void
+        task.done = not task.done
+        refresh()
+    end
+end
+
+function remover(Task task) returns function() returns void
+    return function() returns void
+        tasks.remove(task)
+        refresh()
+    end
+end
+
+function refresh()
+    list.clear()
+    for task in tasks do
+        var item = <li>
+            <label><input type="checkbox" checked={task.done} onchange={toggler(task)}> {task.title}</label>
+            <button class="x" onclick={remover(task)} title="remove">×</button>
+        </li>
+        if task.done then
+            item.add_class("done")
+        end
+        list.append(item)
+    end
+    var left = tasks.filter(function(Task t) => not t.done).length
+    summary.text_content = "{left} of {tasks.length} left"
+end
+
+function set_draft(string value)
+    draft = value
+end
+
+function add()
+    if draft.trim().length > 0 then
+        tasks.push(Task(draft.trim()))
+        draft = ""
+        refresh()
+    end
+end
+
+refresh()
+
+return <html>
+    <head>
+        <title>Todo</title>
+        <style>
+            body { margin: 0; padding: 32px 16px; background: #101014; color: #f2f2ee; font-family: system-ui, sans-serif; }
+            main { max-width: 420px; margin: 0 auto; }
+            h1 { margin: 0 0 16px; font-size: 26px; }
+            form, .add { display: flex; gap: 8px; margin-bottom: 14px; }
+            input[type=text] { flex: 1; font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid #2c2c35; background: #18181e; color: inherit; }
+            button { font: inherit; border: 0; border-radius: 10px; padding: 0 14px; background: #d4ff3a; color: #111; font-weight: 700; cursor: pointer; }
+            ul { list-style: none; padding: 0; margin: 0; }
+            li { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 10px; background: #18181e; margin-bottom: 6px; }
+            li.done label { color: #777; text-decoration: line-through; }
+            li .x { background: none; color: #888; font-size: 18px; padding: 0 6px; }
+            .summary { color: #888; font-size: 13px; }
+        </style>
+    </head>
+    <body>
+        <main>
+            <h1>Todo</h1>
+            <div class="add">
+                <input id="draft" type="text" placeholder="Add a task" value={draft} oninput={set_draft}>
+                <button onclick={add}>Add</button>
+            </div>
+            {list}
+            {summary}
+        </main>
+    </body>
+</html>

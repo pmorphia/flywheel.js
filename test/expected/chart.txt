@@ -1,0 +1,9 @@
+-- exit 0
+-- app
+<html><head><title>Chart</title><style>
+            body { margin: 0; padding: 24px; font-family: ui-monospace, monospace; background: #0b0b0e; color: #eee; }
+            h1 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+            .bar { fill: #d4ff3a; }
+            .name { fill: #aaa; font-size: 13px; }
+            .n { fill: #fff; font-size: 13px; font-weight: 700; }
+        </style></head><body><h1>stars (made up)</h1><svg viewBox="0 0 600 200" width="100%"><g><text x="150" y="37" text-anchor="end" class="name">Flywheel</text><rect x="160" y="16" width="360" height="30" rx="6" class="bar"></rect><text x="528" y="37" class="n">42</text><text x="150" y="83" text-anchor="end" class="name">Pulley</text><rect x="160" y="62" width="231" height="30" rx="6" class="bar"></rect><text x="399" y="83" class="n">27</text><text x="150" y="129" text-anchor="end" class="name">vscode-flywheel</text><rect x="160" y="108" width="162" height="30" rx="6" class="bar"></rect><text x="330" y="129" class="n">19</text><text x="150" y="175" text-anchor="end" class="name">polymorphia.dev</text><rect x="160" y="154" width="102" height="30" rx="6" class="bar"></rect><text x="270" y="175" class="n">12</text></g></svg></body></html>

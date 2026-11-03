@@ -1,0 +1,39 @@
+# Markup is just values: build an SVG chart from a map.
+import html.*
+import svg.*
+
+map<string, int> stars = {"Flywheel": 42, "Pulley": 27, "vscode-flywheel": 19, "polymorphia.dev": 12}
+
+var bars = <g></g>
+int row = 0
+int widest = 0
+for name, n in stars do
+    if n > widest then
+        widest = n
+    end
+end
+for name, n in stars do
+    var y = 16 + row * 46
+    var w = n * 360 // widest
+    bars.append(<text x="150" y={y + 21} text-anchor="end" class="name">{name}</text>)
+    bars.append(<rect x="160" y={y} width={w} height="30" rx="6" class="bar"/>)
+    bars.append(<text x={168 + w} y={y + 21} class="n">{n}</text>)
+    row += 1
+end
+
+return <html>
+    <head>
+        <title>Chart</title>
+        <style>
+            body { margin: 0; padding: 24px; font-family: ui-monospace, monospace; background: #0b0b0e; color: #eee; }
+            h1 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+            .bar { fill: #d4ff3a; }
+            .name { fill: #aaa; font-size: 13px; }
+            .n { fill: #fff; font-size: 13px; font-weight: 700; }
+        </style>
+    </head>
+    <body>
+        <h1>stars (made up)</h1>
+        <svg viewBox="0 0 600 200" width="100%">{bars}</svg>
+    </body>
+</html>

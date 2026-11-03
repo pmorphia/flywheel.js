@@ -1,0 +1,10 @@
+# Welcome to the Flywheel playground. Press Ctrl+Enter (or ▶ Run) to run.
+print "Hello, world!"
+
+var name = "Flywheel"
+int year = 2026
+print "{name} says hi from {year}."
+
+# format specs work like Python's
+var price = 1234.5
+print "{price:,.2f} | {42:>6} | {0.256:.1%} | {255:#x} | {"ok":*^6}"
