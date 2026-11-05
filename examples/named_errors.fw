@@ -1,0 +1,36 @@
+# Named errors, assert, `then`, and <json> literals (Flywheel 2.8 and later).
+import json
+
+function load(string key) returns string
+    if key == "" then
+        throw "EmptyKey" "the key is empty"
+    end
+    return key
+end
+
+for key in ["name", ""] do
+    try
+        print "loaded", load(key)
+    catch "EmptyKey" e
+        print "caught", e.name + ":", e.message
+    then
+        print "  (done with '{key}')"
+    end
+end
+
+try
+    throw "ValueError" "bad value"
+catch ValueError v
+    print v.name, "->", v.message
+end
+
+try
+    assert 1 > 2 "math is broken"
+catch AssertionError a
+    print a.message
+end
+assert 1 < 2 "fine"
+
+var config = <json>{"name": "demo", "ports": [8000, 8001], "debug": false}</json>
+print json.as_string(config["name"]), json.as_int(config["ports"][0])
+print json.dumps(config)

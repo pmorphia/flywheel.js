@@ -1,0 +1,9 @@
+loaded name
+  (done with 'name')
+caught EmptyKey: the key is empty
+  (done with '')
+ValueError -> bad value
+math is broken
+demo 8000
+{"name":"demo","ports":[8000,8001],"debug":false}
+-- exit 0

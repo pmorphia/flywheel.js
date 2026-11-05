@@ -8,11 +8,12 @@ The real compiler is C++ on LLVM and produces native executables. flywheel.js is
 
 - classes, interfaces, inheritance and components
 - enums with data, `match`, generics (erased) and nullable values
-- closures, format specs (`{x:,.2f}`, `{n:#x}`, …), collections, `Result`s, exceptions and `defer`
+- closures, format specs (`{x:,.2f}`, `{n:#x}`, …), collections, `Result`s, `defer`, and error handling with typed and named errors (`throw "Name" "message"`, `catch "Name" e`), `assert`, and `then` as another spelling of `finally`
+- `<json>…</json>` literals, string imports (`import "math"`), top-level `return`, and the `json.load/dump/loads/dumps`, `time.delay/millis/elapsed/today/clock/timestamp` helpers
 - native markup (`<div class={c}>…</div>`) with live event handlers
 - a browser-safe subset of the standard library, including `html`, `web.serve` routes and `desktop.window`
 
-**Not included:** static type checking (programs the compiler would reject may still run), plus files, processes, networking and databases. Install [Flywheel](https://flywheel.polymorphia.dev) for those.
+**Not included:** static type checking (programs the compiler would reject may still run), plus processes, networking, databases, native imports (`import c`, `import++`, `import rust`, `import zig`) and importing files or URLs. Native imports raise a catchable `NativeError`. File access (`json.load`, `json.dump`, `flywheel.run`) works under Node only. Install [Flywheel](https://flywheel.polymorphia.dev) for the rest.
 
 ## Browser
 
@@ -40,7 +41,11 @@ The CLI:
 
 ```
 npx flywheel-js run examples/hello.fw
+npx flywheel-js run -s 'print 6 * 7'           # code from the command line
 npx flywheel-js check main.fw
+npx flywheel-js export report.fw report.html   # write the value the program returns
+npx flywheel-js debug main.fw                  # print the returned value and run time
+npx flywheel-js serve page.fw --port 8080      # serve the returned page
 npx flywheel-js repl
 ```
 
@@ -49,11 +54,11 @@ npx flywheel-js repl
 | | |
 |---|---|
 | `Flywheel.run(code, opts)` | Runs a program and returns `{ status, value, html, text, served, window, interp }`. `value` is an element when the program returns one, serves `/`, or opens a `desktop.window`. Render it with `interp.render(value)`. |
-| `opts` | `print(line)`, `error(line)`, `stdin` (array of lines for `input()`), `name` (file name used in messages), `maxSteps` |
+| `opts` | `print(line)`, `error(line)`, `stdin` (array of lines for `input()`), `name` (file name used in messages), `args` (array for `os.args()`), `maxSteps` |
 | `Flywheel.parse(code, name)` | Parses only. Throws `Flywheel.CompileError` with `line` and `col`. |
 | `new Flywheel.Session(opts)` | A REPL session whose `exec(code)` keeps its variables between calls. |
 | `interp.callFromHost(fn, args)` | Calls a Flywheel function, such as an `onclick={f}` handler, after the run. It returns an error string or `null`. |
-| `Flywheel.version` | `"2.3 (beta-3) flywheel.js"` |
+| `Flywheel.version` | `"2.9 (beta-9) flywheel.js"` |
 
 ## Tests
 
