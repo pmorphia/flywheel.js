@@ -38,7 +38,7 @@ const ERROR_TYPES = ["Error", "RuntimeError", "FileError", "InputError", "Proces
  * ========================================================================================= */
 const KEYWORDS = new Set(("if then else while do for in end break continue return try catch finally throw and or not " +
   "var const function returns class component interface enum extends implements match case import as is inst " +
-  "attr super null true false defer private public readonly elements").split(" "));
+  "attr super null true false defer private public readonly elements which").split(" "));
 const OPS = ["..<", "//=", "..", "//", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", "=>", "??",
   "+", "-", "*", "/", "%", "<", ">", "=", "(", ")", "[", "]", "{", "}", ",", ".", ":", ";", "?", "\\"];
 // a line ending in one of these continues onto the next line
@@ -815,9 +815,31 @@ class Parser {
     }
     return false;
   }
-  expr(minPrec) { return this.infix(this.unary(), minPrec || 0); }
+  // `items which condition` keeps the items for which the condition holds. It binds looser than every
+  // other operator and chains left to right: `xs which > 1 which < 9`.
+  expr(minPrec) {
+    let e = this.infix(this.unary(), minPrec || 0);
+    while (!minPrec && this.peek().t === "kw" && this.peek().v === "which") e = this.which(e);
+    return e;
+  }
+  which(items) {
+    const tk = this.next(), line = this.line(tk), at = this.peek();
+    if (at.t === "nl" || at.t === "eof" || (at.t === "kw" && at.v === "which"))
+      throw this.err("'which' expects a condition, such as 'which .age >= 18' or 'which > 10'", at);
+    this.whichDepth = (this.whichDepth || 0) + 1;
+    let cond;
+    try { cond = this.infix(this.unary(), 0); } finally { this.whichDepth--; }
+    const params = [{ name: "$which", type: null, def: null }];
+    return { k: "Which", e: items, fn: { k: "Lambda", params, ret: null, body: [{ k: "Return", value: cond, line }], line }, line };
+  }
   unary() {
     const tk = this.peek();
+    if (this.whichDepth > 0) {
+      // inside a `which` condition, `.name` reads a member of the item, and a leading operator compares it
+      if (tk.t === "op" && tk.v === "." && this.peek(1).t === "id") return this.postfix({ k: "Ident", name: "$which", line: this.line(tk) });
+      if ((tk.t === "op" && ["==", "!=", "<", ">", "<=", ">=", "*", "/", "//", "%"].includes(tk.v)) || (tk.t === "kw" && (tk.v === "in" || tk.v === "is")))
+        return { k: "Ident", name: "$which", line: this.line(tk) };
+    }
     if (tk.t === "op" && (tk.v === "-" || tk.v === "+")) {
       this.next();
       const operand = this.infix(this.unary(), 9);
@@ -1781,6 +1803,17 @@ class Interp {
       }
       case "Lambda": return new FwFunc("lambda", e.params, e.body, scope);
       case "JsonLit": return new JsonVal(JSON.parse(JSON.stringify(e.v)));
+      case "Which": {
+        const v = this.eval(e.e, scope);
+        const items = seqItems(v) || (v instanceof FwSet ? v.items() : null);
+        if (!items) fail("CastError", `'which' filters an array, tuple, or set, not ${this.typeName(v)}`);
+        const f = new FwFunc("lambda", e.fn.params, e.fn.body, scope);
+        return items.filter(x => {
+          const r = this.call(f, [x]);
+          if (typeof r !== "boolean") fail("CastError", `'which' condition must be bool, got ${this.typeName(r)}`);
+          return r;
+        });
+      }
       case "Markup": return this.evalMarkup(e, scope);
     }
     throw new Error("cannot evaluate " + e.k);
