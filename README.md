@@ -10,7 +10,7 @@ The real compiler is C++ on LLVM and produces native executables. flywheel.js is
 - enums with data, `match`, generics (erased) and nullable values
 - closures, format specs (`{x:,.2f}`, `{n:#x}`, …), collections, `Result`s, `defer`, and error handling with typed and named errors (`throw "Name" "message"`, `catch "Name" e`), `assert`, and `then` as another spelling of `finally`
 - `<json>…</json>` literals, string imports (`import "math"`), top-level `return`, and the `json.load/dump/loads/dumps`, `time.delay/millis/elapsed/today/clock/timestamp` helpers
-- units of measure (Flywheel 2.12): `unitns name`, `unit`, `unitconv`, quantity literals (`100m`, `0.32km`), quantity types of any numeric type (`int[time]`, `u8[data]`, `float[metric.length]`), `x in cm`, `type()`/`unit()`/`unitns()`, and the `metric`, `imperial`, and `time` unit libraries; mixing namespaces is reported when the operation runs
+- units of measure (Flywheel 2.12): `unitns name`, `unit`, `unitconv`, quantity literals (`100m`, `0.32km`), quantity types of any numeric type (`int[time]`, `u8[data]`, `float[metric.length]`), `x in cm`, `type()`/`unit()`/`unitns()`, `unitconv 1length.ft = 0.3048metric.length.m` relations between namespaces (`1m + 1ft` is `1.3048m`), and the `metric`, `imperial`, and `time` unit libraries; mixing namespaces is reported when the operation runs
 - native markup (`<div class={c}>…</div>`) with live event handlers
 - a browser-safe subset of the standard library, including `html`, `web.serve` routes and `desktop.window`
 

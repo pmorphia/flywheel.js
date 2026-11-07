@@ -9,6 +9,7 @@ print 3m * 4m, 3m * 4m * 2m in l               # 12m2 24000l
 
 float[imperial.length] run = 5mi
 print run in ft, run / 40min in mph            # 26400ft 7.5mph
+print 1m + 1ft, 1ft + 1m, 5ft in cm              # the second value in the first one's unit
 
 # A namespace of your own; units apply to every numeric type.
 unitns data
