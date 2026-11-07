@@ -1,0 +1,23 @@
+# Units of measure: the metric, imperial, and time libraries, and units of your own.
+import metric
+import imperial
+import time
+
+float[metric.length] trip = 12.5km
+print trip in m, trip / 30min in kmph          # 12500m 25kmph
+print 3m * 4m, 3m * 4m * 2m in l               # 12m2 24000l
+
+float[imperial.length] run = 5mi
+print run in ft, run / 40min in mph            # 26400ft 7.5mph
+
+# A namespace of your own; units apply to every numeric type.
+unitns data
+unit data.B = 1
+unit data.KB = 1000
+unit data.MB = 1000000
+i64[data] download = 250MB
+u8[data] header = 64B
+print download + header, download in KB, type(download), unitns(header)
+
+int[time] wait = 90s
+print wait in min, wait < 2min, [1s, 1min, 1h]
