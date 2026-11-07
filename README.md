@@ -4,13 +4,13 @@ The [Flywheel](https://github.com/fwlang/flywheel) language in JavaScript. One d
 
 It powers the playground at **[flywheel.polymorphia.dev](https://flywheel.polymorphia.dev)**.
 
-The real compiler is C++ on LLVM and produces native executables. flywheel.js is a tree-walking interpreter that follows the compiler's semantics and output formatting closely enough for learning and prototyping. It is version **2.1 (beta-1)**. It supports:
+The real compiler is C++ on LLVM and produces native executables. flywheel.js is a tree-walking interpreter that follows the compiler's semantics and output formatting closely enough for learning and prototyping. It is version **2.2 (beta-2)**. It supports:
 
 - classes, interfaces, inheritance and components
 - enums with data, `match`, generics (erased) and nullable values
 - closures, format specs (`{x:,.2f}`, `{n:#x}`, …), collections, `Result`s, `defer`, and error handling with typed and named errors (`throw "Name" "message"`, `catch "Name" e`), `assert`, and `then` as another spelling of `finally`
 - `<json>…</json>` literals, string imports (`import "math"`), top-level `return`, and the `json.load/dump/loads/dumps`, `time.delay/millis/elapsed/today/clock/timestamp` helpers
-- units of measure (Flywheel 2.12): `unitns name`, `unit`, `unitconv`, quantity literals (`100m`, `0.32km`), quantity types of any numeric type (`int[time]`, `u8[data]`, `float[metric.length]`), `x in cm`, `type()`/`unit()`/`unitns()`, `unitconv 1length.ft = 0.3048metric.length.m` relations between namespaces (`1m + 1ft` is `1.3048m`), and the `metric`, `imperial`, and `time` unit libraries; mixing namespaces is reported when the operation runs
+- units of measure (Flywheel 2.12): `unitns name`, `unit`, `unitconv`, quantity literals (`100m`, `0.32km`), quantity types of any numeric type (`int[time]`, `u8[data]`, `float[metric.length]`), `x in cm`, `type()`/`unit()`/`unitns()`, `unitconv 1length.ft = 0.3048metric.length.m` relations between namespaces (`1m + 1ft` is `1.3048m`), and the `metric`, `imperial`, and `time` unit libraries (`time.sleep` takes seconds or a time quantity, Flywheel 2.13); mixing namespaces is reported when the operation runs
 - native markup (`<div class={c}>…</div>`) with live event handlers
 - a browser-safe subset of the standard library, including `html`, `web.serve` routes and `desktop.window`
 
@@ -59,7 +59,7 @@ npx flywheel-js repl
 | `Flywheel.parse(code, name)` | Parses only. Throws `Flywheel.CompileError` with `line` and `col`. |
 | `new Flywheel.Session(opts)` | A REPL session whose `exec(code)` keeps its variables between calls. |
 | `interp.callFromHost(fn, args)` | Calls a Flywheel function, such as an `onclick={f}` handler, after the run. It returns an error string or `null`. |
-| `Flywheel.version` | `"2.1 (beta-1) flywheel.js"` |
+| `Flywheel.version` | `"2.2 (beta-2) flywheel.js"` |
 
 ## Tests
 
