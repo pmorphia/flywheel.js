@@ -1,0 +1,21 @@
+# `run` takes one call in place of `then`/`do` ... `end`.
+function greet(string size)
+    print "a {size} number"
+end
+function run_all(int[] xs)
+    for x in xs run classify(x)
+end
+function classify(int x)
+    if x > 100 run greet("big")
+    else if x > 10 run greet("medium")
+    else run greet("small")
+end
+run_all([5, 50, 500])
+if true then
+    if false run print "never"
+else
+    print "the outer else is not taken"
+end
+var queue = ["a", "b"]
+while queue.length > 0 run print "took", queue.pop()
+if queue.length == 0 run print "empty" else run print "left:", queue

@@ -1,0 +1,7 @@
+a small number
+a medium number
+a big number
+took b
+took a
+empty
+-- exit 0
