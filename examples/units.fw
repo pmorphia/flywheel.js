@@ -22,3 +22,10 @@ print download + header, download in KB, type(download), unitns(header)
 
 int[time] wait = 90s
 print wait in min, wait < 2min, [1s, 1min, 1h]
+
+# time.sleep takes seconds or a time quantity, converted to seconds
+int[time] pause = 20ms
+var start = time.monotonic()
+time.sleep pause
+time.sleep (pause in s).value
+print time.monotonic() - start >= 0.04
