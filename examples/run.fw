@@ -1,4 +1,4 @@
-# `run` takes one call in place of `do` ... `end`.
+# `run` takes one call in place of `do` ... `end`; its parentheses are optional (`run done`).
 function greet(string size)
     print "a {size} number"
 end
@@ -19,3 +19,7 @@ end
 var queue = ["a", "b"]
 while queue.length > 0 run print "took", queue.pop()
 if queue.length == 0 run print "empty" else run print "left:", queue
+function done
+    print "done"
+end
+if queue.length == 0 run done
