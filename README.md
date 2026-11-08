@@ -4,7 +4,7 @@ The [Flywheel](https://github.com/fwlang/flywheel) language in JavaScript. One d
 
 It powers the playground at **[flywheel.polymorphia.dev](https://flywheel.polymorphia.dev)**.
 
-The real compiler is C++ on LLVM and produces native executables. flywheel.js is a tree-walking interpreter that follows the compiler's semantics and output formatting closely enough for learning and prototyping. It is version **2.2 (beta-2)**. It supports:
+The real compiler is C++ on LLVM and produces native executables. flywheel.js is a tree-walking interpreter that follows the compiler's semantics and output formatting closely enough for learning and prototyping. It is version **2.3 (beta-3)**. It supports:
 
 - classes, interfaces, inheritance and components
 - enums with data, `match`, generics (erased) and nullable values
@@ -51,6 +51,8 @@ npx flywheel-js serve page.fw --port 8080      # serve the returned page
 npx flywheel-js repl
 ```
 
+Commands take the compiler's short aliases: `r` (run), `c` (check), `e` (export), `db` (debug), `s` (serve), `d` (desktop), `h`/`help`/`--help`, and `v`/`version`/`--version` (`npx flywheel-js r main.fw`). `build`, `test`, `format`, `doc`, `lsp`, and `update` (and their aliases) need the Flywheel compiler and say so.
+
 ## API
 
 | | |
@@ -60,7 +62,7 @@ npx flywheel-js repl
 | `Flywheel.parse(code, name)` | Parses only. Throws `Flywheel.CompileError` with `line` and `col`. |
 | `new Flywheel.Session(opts)` | A REPL session whose `exec(code)` keeps its variables between calls. |
 | `interp.callFromHost(fn, args)` | Calls a Flywheel function, such as an `onclick={f}` handler, after the run. It returns an error string or `null`. |
-| `Flywheel.version` | `"2.2 (beta-2) flywheel.js"` |
+| `Flywheel.version` | `"2.3 (beta-3) flywheel.js"` |
 
 ## Tests
 

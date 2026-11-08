@@ -9,7 +9,10 @@
  *   flywheel-js serve page.fw [--port N]   serve the returned page at http://127.0.0.1:8000/
  *   flywheel-js desktop page.fw            write the returned page to a file and open it in a browser
  *   flywheel-js repl                       interactive session
- *   flywheel-js --version
+ *   flywheel-js help | version             usage, version
+ *
+ * Commands take the compiler's short aliases: r (run), c (check), e (export), db (debug),
+ * s (serve), d (desktop), h (help), v (version).
  *
  * A top-level `return n` ends the program with status n. A program that returns an element (or
  * serves "/") prints the rendered HTML under `run`. */
@@ -19,10 +22,20 @@ const path = require("path");
 const Flywheel = require("../flywheel.js");
 
 const argv = process.argv.slice(2);
-const cmd = argv.shift();
+// Short aliases, as in the Flywheel compiler; fmt is the old name of format.
+const aliases = { r: "run", b: "build", c: "check", d: "desktop", s: "serve", e: "export", db: "debug",
+  t: "test", f: "format", fmt: "format", u: "update", h: "help", "-h": "help", "--help": "help",
+  v: "version", "-v": "version", "--version": "version" };
+const given = argv.shift();
+const cmd = Object.hasOwn(aliases, given) ? aliases[given] : given;
+const usageText =
+  "usage: flywheel-js run|r, check|c, debug|db <file.fw | -s CODE> [-- args]\n" +
+  "       flywheel-js export|e <file.fw | -s CODE> <output> [args]\n" +
+  "       flywheel-js serve|s, desktop|d <file.fw> [--port N] [--host H]\n" +
+  "       flywheel-js repl | help|h|--help | version|v|--version\n" +
+  "build (b), test (t), format (fmt, f), doc, lsp, and update (u) need the Flywheel compiler.";
 const usage = () => {
-  console.error("usage: flywheel-js run|check|debug <file.fw | -s CODE> [-- args] | export <file.fw | -s CODE> <output> [args] |\n" +
-    "       serve|desktop <file.fw> [--port N] [--host H] | repl | --version");
+  console.error(usageText);
   process.exit(2);
 };
 const readStdin = () => {
@@ -53,8 +66,13 @@ function source(args, { needOutput } = {}) {
 const render = r => r.value instanceof Flywheel.FwElement ? r.interp.render(r.value) : r.html != null ? r.html : null;
 const flag = (args, f, d) => { const i = args.indexOf(f); if (i < 0) return d; const v = args[i + 1]; args.splice(i, 2); return v; };
 
-if (cmd === "--version" || cmd === "-v" || cmd === "version") {
+if (cmd === "version") {
   console.log("flywheel " + Flywheel.version);
+} else if (cmd === "help") {
+  console.log(usageText);
+} else if (["build", "test", "format", "doc", "lsp", "update"].includes(cmd)) {
+  console.error(`flywheel-js: \`${cmd}\` needs the Flywheel compiler: use \`flywheel ${cmd}\``);
+  process.exit(2);
 } else if (cmd === "check") {
   const { code, name } = source(argv);
   try { Flywheel.parse(code, name); console.log(`${name} parses`); }
