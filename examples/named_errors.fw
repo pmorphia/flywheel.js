@@ -3,7 +3,7 @@ import json
 
 function load(string key) returns string
     if key == "" do
-        throw "EmptyKey" "the key is empty"
+        throw "EmptyKey" with "the key is empty"
     end
     return key
 end
@@ -19,7 +19,7 @@ for key in ["name", ""] do
 end
 
 try
-    throw "ValueError" "bad value"
+    throw "ValueError" with "bad value"
 catch ValueError v
     print v.name, "->", v.message
 end

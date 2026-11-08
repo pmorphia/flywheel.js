@@ -468,14 +468,14 @@ class Parser {
         case "throw": {
           this.next();
           const value = this.expr();
-          // throw "Name" "message"  (a comma between the two is optional)
-          if (!this.eol() && !this.kw("end") && (value.k === "Lit" || value.k === "Str")) {
-            this.accept("op", ",");
+          // throw "Name" with "message", throw ErrorType with "message"
+          if (this.is("id", "with")) {
+            this.next();
+            if (this.eol() || this.kw("end")) throw this.err("'with' expects a message, such as throw BadInput with \"the input is bad\"");
             const msg = this.expr();
-            if (value.k !== "Lit" || typeof value.v !== "string" || !(msg.k === "Lit" && typeof msg.v === "string" || msg.k === "Str"))
-              throw this.err("throw with a name expects two strings");
-            this.endStmt(); return { k: "Throw", name: value.v, value: msg };
+            this.endStmt(); return { k: "Throw", value, with: msg };
           }
+          if (!this.eol() && !this.kw("end")) throw this.err("expected 'with' before the message, such as throw \"Name\" with \"message\"");
           this.endStmt(); return { k: "Throw", value };
         }
         case "defer": {
@@ -1656,8 +1656,17 @@ class Interp {
       case "Break": throw BREAK;
       case "Continue": throw CONTINUE;
       case "Throw": {
-        const v = this.eval(st.value, scope);
-        if (st.name !== undefined) throw new FwThrow(new FwError(st.name, this.show(v, false)));
+        let v = this.eval(st.value, scope);
+        if (st.with) {
+          const msg = this.eval(st.with, scope);
+          if (typeof msg !== "string") fail("CastError", "throw ... with expects a string message");
+          if (typeof v === "string") throw new FwThrow(new FwError(v, msg));
+          if (v instanceof Native && ERROR_TYPES.includes(v.name) && v.name !== "Error") throw new FwThrow(new FwError(v.name, msg));
+          if (v instanceof FwClass) v = this.construct(v, []);
+          if (!(v instanceof Instance)) fail("CastError", "throw ... with expects an error type or a string name, then a string message: throw BadInput with \"message\"");
+          v.f.set("message", msg);
+          throw new FwThrow(v);
+        }
         if (v === null) fail("RuntimeError", "cannot throw null");
         throw new FwThrow(v);
       }
