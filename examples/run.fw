@@ -1,4 +1,4 @@
-# `run` takes one call in place of `then`/`do` ... `end`.
+# `run` takes one call in place of `do` ... `end`.
 function greet(string size)
     print "a {size} number"
 end
@@ -11,9 +11,9 @@ function classify(int x)
     else run greet("small")
 end
 run_all([5, 50, 500])
-if true then
+if true do
     if false run print "never"
-else
+else do
     print "the outer else is not taken"
 end
 var queue = ["a", "b"]

@@ -1,8 +1,8 @@
-# Named errors, assert, `then`, and <json> literals (Flywheel 2.8 and later).
+# Named errors, assert, finally, and <json> literals (Flywheel 2.8 and later).
 import json
 
 function load(string key) returns string
-    if key == "" then
+    if key == "" do
         throw "EmptyKey" "the key is empty"
     end
     return key
@@ -13,7 +13,7 @@ for key in ["name", ""] do
         print "loaded", load(key)
     catch "EmptyKey" e
         print "caught", e.name + ":", e.message
-    then
+    finally
         print "  (done with '{key}')"
     end
 end

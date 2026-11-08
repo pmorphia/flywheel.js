@@ -32,7 +32,7 @@ function refresh()
             <label><input type="checkbox" checked={task.done} onchange={toggler(task)}> {task.title}</label>
             <button class="x" onclick={remover(task)} title="remove">×</button>
         </li>
-        if task.done then
+        if task.done do
             item.add_class("done")
         end
         list.append(item)
@@ -46,7 +46,7 @@ function set_draft(string value)
 end
 
 function add()
-    if draft.trim().length > 0 then
+    if draft.trim().length > 0 do
         tasks.push(Task(draft.trim()))
         draft = ""
         refresh()

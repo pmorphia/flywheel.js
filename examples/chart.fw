@@ -8,7 +8,7 @@ var bars = <g></g>
 int row = 0
 int widest = 0
 for name, n in stars do
-    if n > widest then
+    if n > widest do
         widest = n
     end
 end

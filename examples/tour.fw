@@ -27,11 +27,11 @@ end
 
 function size(Shape shape) returns Size
     match shape
-        case Circle c if c.radius > 2.0 then
+        case Circle c if c.radius > 2.0 do
             return Size.Large
-        case Square s if s.side > 3.0 then
+        case Square s if s.side > 3.0 do
             return Size.Large
-        else
+        else do
             return Size.Small
     end
 end

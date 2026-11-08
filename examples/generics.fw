@@ -8,7 +8,7 @@ class Stack<T>
         inst items.push(item)
     end
     function pop() returns T?
-        if inst items.length == 0 then
+        if inst items.length == 0 do
             return null
         end
         return inst items.pop()
@@ -18,7 +18,7 @@ end
 function largest<T is comparable>(T[] items) returns T
     var best = items[0]
     for x in items do
-        if x > best then
+        if x > best do
             best = x
         end
     end
@@ -28,7 +28,7 @@ end
 class Countdown
     int n
     function next() returns int?
-        if inst n == 0 then
+        if inst n == 0 do
             return null
         end
         inst n -= 1

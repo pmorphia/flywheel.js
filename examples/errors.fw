@@ -5,7 +5,7 @@ class ParseError
 end
 
 function parse_digit(string text, int column) returns int
-    if text.length != 1 or not ("0" <= text and text <= "9") then
+    if text.length != 1 or not ("0" <= text and text <= "9") do
         throw ParseError("expected a digit, got '{text}'", column)
     end
     return int(text)
@@ -30,7 +30,7 @@ for input in ["1234", "12x4"] do
 end
 
 function divide(int n, int d) returns Result<int, string>
-    if d == 0 then
+    if d == 0 do
         return Result.error("division by zero")
     end
     return Result.ok(n // d)
@@ -38,9 +38,9 @@ end
 
 for d in [4, 0] do
     match divide(42, d)
-        case ok value then
+        case ok value do
             print "42 // {d} = {value}"
-        case error why then
+        case error why do
             print "42 // {d} failed: {why}"
     end
 end
