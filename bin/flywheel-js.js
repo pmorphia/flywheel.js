@@ -2,6 +2,7 @@
 /* flywheel-js — run Flywheel programs with flywheel.js from the command line.
  *
  *   flywheel-js run main.fw [-- args]      run a program (stdin feeds input())
+ *   flywheel-js main.fw [args]             the same
  *   flywheel-js run -s 'print 6 * 7'       run code given on the command line
  *   flywheel-js check main.fw              parse only
  *   flywheel-js export main.fw out.json    write the value the program returns at top level
@@ -27,12 +28,22 @@ const aliases = { r: "run", b: "build", c: "check", d: "desktop", s: "serve", e:
   t: "test", f: "format", fmt: "format", u: "update", h: "help", "-h": "help", "--help": "help",
   v: "version", "-v": "version", "--version": "version" };
 const given = argv.shift();
-const cmd = Object.hasOwn(aliases, given) ? aliases[given] : given;
+const commands = new Set(["run", "build", "check", "desktop", "serve", "export", "debug", "test", "format", "doc",
+  "lsp", "update", "help", "version", "repl"]);
+let cmd = Object.hasOwn(aliases, given) ? aliases[given] : given;
+// `flywheel-js SOURCE [arguments]` runs SOURCE with every later argument; `flywheel-js -s CODE` runs code
+if (given !== undefined && !commands.has(cmd)) {
+  if (given === "-s" || given === "--source") argv.unshift(given);
+  else if (!given.startsWith("-")) { argv.unshift(given, "--"); if (argv[2] === "--") argv.splice(2, 1); }
+  else usage();
+  cmd = "run";
+}
 const usageText =
   "usage: flywheel-js run|r, check|c, debug|db <file.fw | -s CODE> [-- args]\n" +
   "       flywheel-js export|e <file.fw | -s CODE> <output> [args]\n" +
   "       flywheel-js serve|s, desktop|d <file.fw> [--port N] [--host H]\n" +
   "       flywheel-js repl | help|h|--help | version|v|--version\n" +
+  "`flywheel-js SOURCE [arguments]` runs SOURCE.\n" +
   "build (b), test (t), format (fmt, f), doc, lsp, and update (u) need the Flywheel compiler.";
 const usage = () => {
   console.error(usageText);

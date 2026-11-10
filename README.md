@@ -6,7 +6,9 @@ It powers the playground at **[flywheel.polymorphia.dev](https://flywheel.polymo
 
 The real compiler is C++ on LLVM and produces native executables. flywheel.js is a tree-walking interpreter that follows the compiler's semantics and output formatting closely enough for learning and prototyping. It is version **2.4 (beta-4)**. It supports:
 
-- classes, interfaces, inheritance and components
+- classes with `constructor`/`destructor`, `public`/`private`/`protected` and `static` members, multiple inheritance (C3 order, `super.method`, `super.Base.method`), interfaces, decorators (`memoize function f`, `register class C`), and components
+- `x if condition else y`, and `spawn call` (no threads: the call runs at once and `join()` returns its result)
+- the `math` and `random` modules
 - enums with data, `match`, generics (erased) and nullable values
 - closures, format specs (`{x:,.2f}`, `{n:#x}`, …), collections, `Result`s, `defer`, and error handling with typed and named errors (`throw "Name" with "message"`, `catch "Name" e`), and `assert`
 - `<json>…</json>` literals, string imports (`import "math"`), top-level `return`, and the `json.load/dump/loads/dumps`, `time.delay/millis/elapsed/today/clock/timestamp` helpers
@@ -15,7 +17,7 @@ The real compiler is C++ on LLVM and produces native executables. flywheel.js is
 - native markup (`<div class={c}>…</div>`) with live event handlers
 - a browser-safe subset of the standard library, including `html`, `web.serve` routes and `desktop.window`
 
-**Not included:** static type checking (programs the compiler would reject may still run), Flywheel 2.11's declared error types, reactive variables (`when`, including `when ... run`) and negated aliases, plus processes, networking, databases, native imports (`import c`, `import++`, `import rust`, `import zig`) and importing files or URLs. Native imports raise a catchable `NativeError`. File access (`json.load`, `json.dump`, `flywheel.run`) works under Node only. Install [Flywheel](https://flywheel.polymorphia.dev) for the rest.
+**Not included:** static type checking (programs the compiler would reject may still run), Flywheel 2.11's declared error types, reactive variables (`when`, including `when ... run`) and negated aliases, plus processes, networking, databases, native imports (`import c`, `import++`, `import rust`, `import zig`) and importing files or URLs. Native imports raise a catchable `NativeError`. File access (`json.load`, `json.dump`, `flywheel.run`) works under Node only. Destructors run when the program ends, since JavaScript cannot tell when an object becomes unreachable. Install [Flywheel](https://flywheel.polymorphia.dev) for the rest.
 
 ## Browser
 
@@ -43,6 +45,7 @@ The CLI:
 
 ```
 npx flywheel-js run examples/hello.fw
+npx flywheel-js examples/hello.fw              # the same: `flywheel-js SOURCE [arguments]` runs it
 npx flywheel-js run -s 'print 6 * 7'           # code from the command line
 npx flywheel-js check main.fw
 npx flywheel-js export report.fw report.html   # write the value the program returns

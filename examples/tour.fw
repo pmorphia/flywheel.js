@@ -7,17 +7,17 @@ end
 class Circle implements Shape
     double radius
     function area() returns double
-        return 3.14159 * inst radius * inst radius
+        return 3.14159 * this.radius * this.radius
     end
 end
 
 class Square implements Shape
     double side
-    function init(double side)
-        inst side = side
+    constructor(double side)
+        this.side = side
     end
     function area() returns double
-        return inst side * inst side
+        return this.side * this.side
     end
 end
 
