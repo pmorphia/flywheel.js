@@ -4,7 +4,7 @@ The [Flywheel](https://github.com/fwlang/flywheel) language in JavaScript. One d
 
 It powers the playground at **[flywheel.polymorphia.dev](https://flywheel.polymorphia.dev)**.
 
-The real compiler is C++ on LLVM and produces native executables. flywheel.js is a tree-walking interpreter that follows the compiler's semantics and output formatting closely enough for learning and prototyping. It is version **2.4 (beta-4)**. It supports:
+The real compiler is C++ on LLVM and produces native executables. flywheel.js is a tree-walking interpreter that follows the compiler's semantics and output formatting closely enough for learning and prototyping. It is version **2.5 (beta-5)**. It supports:
 
 - classes with `constructor`/`destructor`, `public`/`private`/`protected` and `static` members, multiple inheritance (C3 order, `super.method`, `super.Base.method`), interfaces, decorators (`memoize function f`, `register class C`), and components
 - `x if condition else y`, and `spawn call` (no threads: the call runs at once and `join()` returns its result)
@@ -65,7 +65,7 @@ Commands take the compiler's short aliases: `r` (run), `c` (check), `e` (export)
 | `Flywheel.parse(code, name)` | Parses only. Throws `Flywheel.CompileError` with `line` and `col`. |
 | `new Flywheel.Session(opts)` | A REPL session whose `exec(code)` keeps its variables between calls. |
 | `interp.callFromHost(fn, args)` | Calls a Flywheel function, such as an `onclick={f}` handler, after the run. It returns an error string or `null`. |
-| `Flywheel.version` | `"2.4 (beta-4) flywheel.js"` |
+| `Flywheel.version` | `"2.5 (beta-5) flywheel.js"` |
 
 ## Tests
 
