@@ -56,6 +56,10 @@ const isTagChar = c => /[A-Za-z0-9_.:\-]/.test(c);
 class Source {
   constructor(text, name) {
     this.text = text; this.name = name || "main.fw";
+    // `void component Icon = ...` makes <Icon> a void tag (no `/>` or closing tag). Markup is
+    // delimited while lexing, before declarations are parsed, so the names come from a scan.
+    this.voids = new Set();
+    for (const m of text.matchAll(/(?<![A-Za-z0-9_])void[ \t]+component[ \t]+([A-Za-z_][A-Za-z0-9_]*)/g)) this.voids.add(m[1]);
     this.lineStarts = [0];
     for (let i = 0; i < text.length; i++) if (text[i] === "\n") this.lineStarts.push(i + 1);
   }
@@ -253,7 +257,7 @@ function lexMarkup(S, i) {
       }
     } else attrs.push({ name, v: null });
   }
-  if (VOID_TAGS.has(tag)) return { node: { k: "El", tag, attrs, children: [], off: s0 }, end: j };
+  if (VOID_TAGS.has(tag) || S.voids.has(tag)) return { node: { k: "El", tag, attrs, children: [], off: s0 }, end: j };
   const r = lexChildren(S, j, tag, tag === "style" || tag === "script");
   return { node: { k: "El", tag, attrs, children: r.children, off: s0 }, end: r.end };
 }
@@ -474,6 +478,8 @@ class Parser {
       if (/^(protected|static)$/.test(tk.v)) throw this.err(`'${tk.v}' applies to class members`);
       this.next(); return this.statementInner();
     }
+    // `void component Name = ...`: `void` is a soft keyword before `component`
+    if (tk.t === "id" && tk.v === "void" && this.is("kw", "component", 1)) { this.next(); return this.compDecl(true); }
     const decos = this.decorators();
     if (decos.length) {
       if (this.kw("function")) {
@@ -766,11 +772,15 @@ class Parser {
     this.expect("kw", "end"); this.endStmt();
     return { k: "Enum", name, members };
   }
-  compDecl() {
-    this.next(); const name = this.name(); this.expect("op", "=");
+  compDecl(isVoid = false) {
+    this.next(); const nameTk = this.peek(), name = this.name(); this.expect("op", "=");
     const tk = this.expect("markup");
     this.endStmt();
-    return { k: "Component", name, node: this.markup(tk.v) };
+    const node = this.markup(tk.v);
+    const usesInner = n => n && typeof n === "object" &&
+      ((n.k === "Attr" && n.name === "inner") || Object.values(n).some(usesInner));
+    if (isVoid && usesInner(node)) throw this.err(`void component ${name} has no children; 'attr inner' is not available`, nameTk);
+    return { k: "Component", name, node, isVoid };
   }
   varDecl() {
     const isConst = this.next().v === "const";
@@ -1299,7 +1309,7 @@ const TASK = new FwClass("thread.task");
 class FwEnum { constructor(name) { this.name = name; this.members = []; this.byName = new Map(); } }
 class EnumMember { constructor(en, name, index, fields) { this.en = en; this.name = name; this.index = index; this.fields = fields; this.value = null; } }
 class Module { constructor(name, members) { this.name = name; this.members = members; } }
-class Component { constructor(name, node, scope) { this.name = name; this.node = node; this.scope = scope; } }
+class Component { constructor(name, node, scope, isVoid) { this.name = name; this.node = node; this.scope = scope; this.isVoid = isVoid; } }
 class JsonVal { constructor(v) { this.v = v; } }
 class Window { constructor(title) { this.title = title; this.tree = null; } }
 
@@ -1700,7 +1710,7 @@ class Interp {
         case "Interface": { const c = new FwClass(st.name); c.isInterface = true; c.sigs = st.sigs; scope.def(st.name, c); break; }
         case "Class": { const c = new FwClass(st.name); c.decl = st; scope.def(st.name, c); break; }
         case "Enum": scope.def(st.name, this.makeEnum(st, scope)); break;
-        case "Component": this.components.set(st.name, new Component(st.name, st.node, scope)); break;
+        case "Component": this.components.set(st.name, new Component(st.name, st.node, scope, st.isVoid)); break;
         case "Import": this.doImport(st, scope); break;
       }
     }
@@ -2713,6 +2723,7 @@ class Interp {
   evalMarkup(e, scope) {
     const comp = e.tag && this.components.get(e.tag);
     if (comp) {
+      if (comp.isVoid && e.children.length) fail("RuntimeError", `void component <${comp.name}> cannot have children`);
       const attrs = new Map();
       for (const a of e.attrs) attrs.set(a.name, a.v === null ? true : this.eval(a.v, scope));
       const inner = new FwElement("");

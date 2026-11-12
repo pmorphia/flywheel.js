@@ -6,7 +6,7 @@ It powers the playground at **[flywheel.polymorphia.dev](https://flywheel.polymo
 
 The real compiler is C++ on LLVM and produces native executables. flywheel.js is a tree-walking interpreter that follows the compiler's semantics and output formatting closely enough for learning and prototyping. It is version **2.5 (beta-5)**. It supports:
 
-- classes with `constructor`/`destructor`, `public`/`private`/`protected` and `static` members, multiple inheritance (C3 order, `super.method`, `super.Base.method`), interfaces, decorators (`memoize function f`, `register class C`), and components
+- classes with `constructor`/`destructor`, `public`/`private`/`protected` and `static` members, multiple inheritance (C3 order, `super.method`, `super.Base.method`), interfaces, decorators (`memoize function f`, `register class C`), and components, including `void component Icon = ...`, used like `<br>` as `<Icon name="star">` with no closing tag
 - `x if condition else y`, and `spawn call` (no threads: the call runs at once and `join()` returns its result)
 - the `math` and `random` modules
 - enums with data, `match`, generics (erased) and nullable values

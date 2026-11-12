@@ -1,0 +1,4 @@
+<i class="icon icon-star" title="star"></i>
+<p>Rated <i class="icon icon-star" title="star"></i> <i class="icon icon-star" title="star"></i> <i class="icon icon-star" title="star"></i> of 5</p>
+<div class="card"><img src="/avatars/ann.png" alt="ann" style="width: 2em"><h3>ann</h3><p>Hello <i class="icon icon-wave" title="wave"></i></p></div>
+-- exit 0
