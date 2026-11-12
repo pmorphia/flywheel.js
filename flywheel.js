@@ -1821,7 +1821,7 @@ class Interp {
     if (!mod) {
       const native = ["io", "net", "thread", "sqlite", "compress", "crypto", "gc", "toml", "yaml", "csv", "url", "log", "args", "bigint", "decimal"];
       if (native.includes(root)) throw new FwThrow(new FwError("RuntimeError", `module '${root}' is not available in flywheel.js; install Flywheel to use it`));
-      throw new FwThrow(new FwError("RuntimeError", `unknown module '${st.path}'`));
+      throw new FwThrow(new FwError("RuntimeError", `module '${st.path}' not found (searched library and built-in modules; flywheel.js cannot load installed packages from .flywheel-modules: install Flywheel and Pulley to use them)`));
     }
     if (st.wildcard && (root === "html" || root === "svg")) { scope.def(root, mod); return; }    // tag sets
     if (st.wildcard) { for (const [k, v] of mod.members) scope.def(k, v); return; }
