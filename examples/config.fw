@@ -1,0 +1,13 @@
+# Cogwheel: configuration written as Markdown
+import cogwheel
+
+var conf = cogwheel.parse("Edit fields after >\n\n# Main\n\n## User Section\n\n> name = danny\n\n> email = pixilreal@gmail.com\n")
+print conf["#Main"]["#User Section"][">name"]
+print conf.getById("Main")["#User Section"].get("email")
+print conf.selectorAll()[">name"]
+conf.getById("User Section").set("name", "ann").set("age", "30")
+print conf.to_map()
+
+# documents from markup: <cogwheel.conf> needs no closing tag
+var doc = cogwheel.from_markup(<cogwheel.cw><cogwheel.heading name="Main"><cogwheel.rawstr>Hello world!</cogwheel.rawstr><cogwheel.conf key="name" value="danny"><cogwheel.conf key="email" value="pixilreal@gmail.com"></cogwheel.heading></cogwheel.cw>)
+print doc.source()
