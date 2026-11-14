@@ -1,6 +1,6 @@
 {
   "name": "flywheel.js",
-  "version": "2.7.0-beta.7",
+  "version": "2.8.0-beta.8",
   "description": "The Flywheel language in JavaScript: a browser and Node interpreter for learning and prototyping.",
   "main": "flywheel.js",
   "bin": { "flywheel-js": "bin/flywheel-js.js" },
