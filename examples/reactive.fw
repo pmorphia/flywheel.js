@@ -1,0 +1,61 @@
+# Reactive variables: `when` runs its body each time a condition becomes true, and its `else`
+# body each time the condition becomes false again. `computed` values follow their expression.
+
+reactive bool playerAlive/playerDead = true
+when playerDead do
+    print "Game over!"
+else do
+    print "back in the game"
+end
+playerAlive = false
+playerAlive = true
+
+int score = 0
+computed bool winning = score >= 10
+when winning run print "winning with", score
+score += 4
+score += 7
+score = 0
+score = 12
+
+# A condition can read fields: it is checked again whenever a field of that name is assigned.
+class Player
+    string name
+    int health = 10
+    function hit(int n) returns void
+        this.health -= n
+    end
+end
+var hero = Player("Ann")
+when hero.health <= 0 run print hero.name, "is down"
+hero.hit(4)
+hero.hit(7)
+
+# It can call functions: what they read counts too.
+var x = 0
+var y = 0
+function far() returns bool
+    return x * x + y * y > 25
+end
+when far() run print "far away at", x, y
+x = 3
+y = 5
+
+# `defer when` is checked between statements, so a change made and undone inside one call is
+# never seen, and a change left behind is seen once the call returns.
+var height = 0.0
+defer when height < -10 do
+    print "fell from", height
+    height = 0
+end
+function wobble() returns void
+    height = -20
+    height = 5
+end
+function drop() returns void
+    height = -15
+    print "dropping"
+end
+wobble()
+drop()
+print "height", height

@@ -1,0 +1,10 @@
+Game over!
+back in the game
+winning with 11
+winning with 12
+Ann is down
+far away at 3 5
+dropping
+fell from -15
+height 0
+-- exit 0
