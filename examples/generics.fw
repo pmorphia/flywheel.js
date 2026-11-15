@@ -39,7 +39,7 @@ end
 Stack<string> names = Stack()
 names.push("first")
 names.push("second")
-print names.pop() ?? "empty", names.pop() ?? "empty", names.pop() ?? "empty"
+print names.pop() otherwise "empty", names.pop() otherwise "empty", names.pop() otherwise "empty"
 
 print largest([3, 9, 2]), largest(["pear", "apple", "plum"])
 

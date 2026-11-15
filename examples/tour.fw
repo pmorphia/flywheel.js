@@ -46,6 +46,6 @@ for shape in shapes do
 end
 
 int? best = null
-print best ?? 0, "héllo".length, 7.5 // 2, 1 < 2 < 3
+print best otherwise 0, "héllo".length, 7.5 // 2, 1 < 2 < 3
 print Box("generic").value
 print <ul>{shapes.map(function(Shape s) => <li>{s.area()}</li>)}</ul>
