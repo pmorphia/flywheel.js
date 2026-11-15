@@ -4,7 +4,7 @@
 "use strict";
 const fs = require("fs"), path = require("path");
 const dir = process.argv[2] || path.join(__dirname, "..", "..", "wednesware", "fw", "stdlib", "fw");
-const LIBRARIES = ["cogwheel"];
+const LIBRARIES = ["cogwheel", "random"];
 const file = path.join(__dirname, "..", "flywheel.js");
 const src = fs.readFileSync(file, "utf8");
 const begin = "/* BEGIN LIBRARIES */\n", end = "/* END LIBRARIES */";

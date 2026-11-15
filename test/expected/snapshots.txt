@@ -1,0 +1,6 @@
+after 7 ticks: 58 87 [9, 9, 5, 11, 8]
+restored to tick 3 82 94
+replayed: true
+saved copy untouched: 3 [9, 9]
+hot reload here: false
+-- exit 0

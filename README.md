@@ -8,7 +8,8 @@ The real compiler is C++ on LLVM and produces native executables. flywheel.js is
 
 - classes with `constructor`/`destructor`, `public`/`private`/`protected` and `static` members, multiple inheritance (C3 order, `super.method`, `super.Base.method`), interfaces, decorators (`memoize function f`, `register class C`), and components, including `void component Icon = ...`, used like `<br>` as `<Icon name="star">` with no closing tag
 - `x if condition else y`, and `spawn call` (no threads: the call runs at once and `join()` returns its result)
-- the `math` and `random` modules, and the `cogwheel` library module ([Cogwheel](https://github.com/pmorphia/cogwheel) Markdown configuration; `confile` and `save` need Node)
+- `deep_copy(value)`, which copies everything a value reaches in one call (for saving and restoring a whole state; Flywheel 2.26), and `random.Generator(seed)`, a generator with its own state that gives the same numbers as the compiler's for the same seed
+- the `math` and `random` modules, the `hot` module (`hot.reload()` and `hot.enabled()` are always `false`: hot reload is the compiler's `--hot`), and the `cogwheel` library module ([Cogwheel](https://github.com/pmorphia/cogwheel) Markdown configuration; `confile` and `save` need Node)
 - enums with data, `match` statements and expressions (`case p => value`, Flywheel 2.24), `unless` (`if not`), `otherwise` null fallbacks (`a otherwise b`, formerly `??`, Flywheel 2.25), generics (erased) and nullable values
 - closures, format specs (`{x:,.2f}`, `{n:#x}`, …), collections, `Result`s, `defer`, and error handling with typed and named errors (`throw "Name" with "message"`, `catch "Name" e`), and `assert`
 - `<json>…</json>` literals, string imports (`import "math"`), top-level `return`, and the `json.load/dump/loads/dumps`, `time.delay/millis/elapsed/today/clock/timestamp` helpers

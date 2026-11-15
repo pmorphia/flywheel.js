@@ -1,0 +1,40 @@
+# Saving and restoring a whole game state with deep_copy, with a seeded random.Generator of its
+# own so the replay after a restore rolls the same numbers.
+import random
+import hot
+
+class Fighter
+    string name
+    int health = 100
+    int[] combo = []
+end
+class Match
+    Fighter[] fighters = []
+    random.Generator rng = random.Generator(7)
+    int tick = 0
+end
+
+function play(Match m, int ticks)
+    for i in 0..<ticks do
+        m.tick += 1
+        var target = m.fighters[m.rng.below(2)]
+        var damage = m.rng.integer(5, 12)
+        target.health -= damage
+        target.combo.push(damage)
+    end
+end
+
+var m = Match()
+m.fighters.push(Fighter("Ryo"))
+m.fighters.push(Fighter("Kei"))
+play(m, 3)
+var saved = deep_copy(m)
+play(m, 4)
+var first = "{m.fighters[0].health} {m.fighters[1].health} {m.fighters[0].combo}"
+print "after 7 ticks:", first
+m = deep_copy(saved)
+print "restored to tick", m.tick, m.fighters[0].health, m.fighters[1].health
+play(m, 4)
+print "replayed:", "{m.fighters[0].health} {m.fighters[1].health} {m.fighters[0].combo}" == first
+print "saved copy untouched:", saved.tick, saved.fighters[0].combo
+print "hot reload here:", hot.enabled()
