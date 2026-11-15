@@ -38,7 +38,7 @@ const ERROR_TYPES = ["Error", "RuntimeError", "FileError", "InputError", "Proces
  * ========================================================================================= */
 const KEYWORDS = new Set(("if else while do for in end break continue return try catch finally throw and or not " +
   "var const function returns class component interface enum extends implements match case import as is this " +
-  "attr super null true false defer readonly elements which").split(" "));
+  "attr super null true false defer readonly elements which unless").split(" "));
 const OPS = ["..<", "//=", "..", "//", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", "=>", "??",
   "+", "-", "*", "/", "%", "<", ">", "=", "(", ")", "[", "]", "{", "}", ",", ".", ":", ";", "?", "\\"];
 // a line ending in one of these continues onto the next line
@@ -518,7 +518,7 @@ class Parser {
         case "component": return this.compDecl();
         case "elements": { this.next(); while (!this.kw("end")) { if (this.is("eof")) throw this.err("expected 'end'"); this.next(); } this.next(); return { k: "Nop" }; }
         case "var": case "const": return this.varDecl();
-        case "if": return this.ifStmt();
+        case "if": case "unless": return this.ifStmt();
         case "while": return this.whileStmt();
         case "for": return this.forStmt();
         case "match": return this.matchStmt();
@@ -910,13 +910,13 @@ class Parser {
         const elsePos = this.p;
         this.next();
         if (this.runs()) { otherwise = this.runBody(); this.endStmt(); break; }
-        if (this.kw("if")) {
-          this.next();
+        if (this.kw("if") || this.kw("unless")) {
+          const t = this.next();
           let chained = false;
           const ifPos = this.p;
           try { this.expr(); chained = this.is("id", "run"); } catch (e) { if (!(e instanceof CompileError)) throw e; }
           this.p = ifPos;
-          if (chained) { const c = this.expr(); this.next(); branches.push({ cond: c, body: this.runBody() }); continue; }
+          if (chained) { const c = this.condition(t.v === "unless", this.line(t)); this.next(); branches.push({ cond: c, body: this.runBody() }); continue; }
         }
         this.p = elsePos;
       }
@@ -924,18 +924,21 @@ class Parser {
     }
     return { k: "If", branches, otherwise };
   }
+  // `unless c` is `if not (c)`
+  condition(negated, line) { const c = this.expr(); return negated ? { k: "Not", e: c, line } : c; }
   ifStmt() {
-    this.next();
+    const head = this.next();
     const branches = [];
-    let cond = this.expr();
+    let cond = this.condition(head.v === "unless", this.line(head));
     if (this.runs()) return this.runIf(branches, cond);
     this.expect("kw", "do");
     let body = this.block(["else", "end"]);
     branches.push({ cond, body });
     let otherwise = null;
     while (this.accept("kw", "else")) {
-      if (this.accept("kw", "if")) {
-        cond = this.expr();
+      if (this.kw("if") || this.kw("unless")) {
+        const t = this.next();
+        cond = this.condition(t.v === "unless", this.line(t));
         if (this.runs()) { const rest = this.runIf(branches, cond); return rest; }
         this.expect("kw", "do");
         branches.push({ cond, body: this.block(["else", "end"]) });
@@ -984,6 +987,32 @@ class Parser {
     this.expect("kw", "end"); this.endStmt();
     return { k: "Match", subject, cases, otherwise };
   }
+  // match as an expression: `case pattern => value` ... `else => value` ... `end`; the cases may
+  // share a line
+  matchExpr(line) {
+    return this.withNL(1, () => {
+      const subject = this.expr();
+      const cases = []; let otherwise = null;
+      for (;;) {
+        if (this.accept("kw", "case")) {
+          const pats = [];
+          this.noTernary = true;
+          try { do pats.push(this.pattern()); while (this.accept("op", ",")); } finally { this.noTernary = false; }
+          let guard = null;
+          if (this.accept("kw", "if")) guard = this.expr();
+          if (this.kw("do")) throw this.err("a match expression's cases are 'case pattern => value'; use a match statement for 'do' blocks");
+          this.expect("op", "=>");
+          cases.push({ pats, guard, value: this.expr() });
+        } else if (this.accept("kw", "else")) {
+          if (this.kw("do")) throw this.err("a match expression ends with 'else => value'");
+          this.expect("op", "=>"); otherwise = { value: this.expr() }; break;
+        } else break;
+      }
+      if (!cases.length && !otherwise) throw this.err("match requires at least one case");
+      this.expect("kw", "end");
+      return { k: "MatchExpr", subject, cases, otherwise, line };
+    });
+  }
   pattern() {
     const tk = this.peek();
     // ok v / error e
@@ -1001,7 +1030,7 @@ class Parser {
       const save = this.p;
       const t = this.tryType();
       if (t && t.name !== undefined || (t && (t.arr || t.opt))) {
-        if (this.is("id") && (this.is("kw", "do", 1) || this.is("kw", "if", 1) || this.op(",", 1))) {
+        if (this.is("id") && (this.is("kw", "do", 1) || this.is("kw", "if", 1) || this.op(",", 1) || this.op("=>", 1))) {
           return { p: "Type", type: t, bind: this.next().v };
         }
       }
@@ -1110,7 +1139,7 @@ class Parser {
     const t = this.peek();
     if (t.t === "nl" || t.t === "eof") return false;
     if (t.t === "num" || t.t === "str" || t.t === "char" || t.t === "markup" || t.t === "json" || t.t === "id") return true;
-    if (t.t === "kw") return /^(true|false|null|not|function|this|attr|super)$/.test(t.v);
+    if (t.t === "kw") return /^(true|false|null|not|function|this|attr|super|match)$/.test(t.v);
     if (t.t === "op") {
       if ((t.v === "(" || t.v === "[") && t.sp) return true;
       if ((t.v === "-" || t.v === "+") && t.sp && !this.peek(1).sp) return true;
@@ -1228,6 +1257,7 @@ class Parser {
             return { k: "Super", name, base, line };
           }
           case "function": return this.lambda(line);
+          case "match": return this.matchExpr(line);
         }
         break;
       case "op":
@@ -2522,6 +2552,17 @@ class Interp {
           fail("RuntimeError", `no base class of ${f.cls.name} has a method '${e.name}'`);
         }
         return new Bound(m, f.self);
+      }
+      case "MatchExpr": {
+        const v = this.eval(e.subject, scope);
+        for (const c of e.cases)
+          for (const pat of c.pats) {
+            const s = new Scope(scope);
+            s.plain = true;
+            if (this.matchPat(pat, v, s) && (!c.guard || this.cond(c.guard, s))) return this.eval(c.value, s);
+          }
+        if (e.otherwise) return this.eval(e.otherwise.value, scope);
+        fail("RuntimeError", `no case matched ${this.show(v, true)}`);
       }
       case "Ternary": {
         const c = this.eval(e.c, scope);

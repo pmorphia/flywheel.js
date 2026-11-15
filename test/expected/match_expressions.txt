@@ -1,0 +1,10 @@
+6 3 0
+0 none
+4 a few
+42 42, many
+1000 lots
+B failed: not a number
+not ready yet
+still trying
+exactly three tries
+-- exit 0

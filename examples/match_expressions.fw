@@ -1,0 +1,47 @@
+# A match expression produces the value of the case that matches; `unless c` is `if not (c)`.
+enum Shape
+    Circle(double radius)
+    Rect(double width, double height)
+    Empty
+end
+
+function area(Shape s) returns double
+    return match s
+        case Shape.Circle(r) => 3.0 * r * r
+        case Shape.Rect(w, h) => w * h
+        case Shape.Empty => 0.0
+    end
+end
+
+function size(int n) returns string
+    return match n
+        case 0 => "none"
+        case 1..9 => "a few"
+        case int k if k < 100 => "{k}, many"
+        else => "lots"
+    end
+end
+
+print area(Shape.Rect(2.0, 3.0)), area(Shape.Circle(1.0)), area(Shape.Empty)
+for n in [0, 4, 42, 1000] do
+    print n, size(n)
+end
+
+# Short ones fit on one line.
+var grade = match 87 case 90..100 => 'A' case 80..<90 => 'B' else => 'C' end
+Result<int, string> parsed = Result.error("not a number")
+print grade, match parsed case ok v => "got {v}" case error e => "failed: {e}" end
+
+bool ready = false
+unless ready do
+    print "not ready yet"
+else do
+    print "ready"
+end
+int tries = 3
+unless tries > 5 run print("still trying")
+unless tries == 3 do
+    print "unexpected"
+else unless tries > 3 do
+    print "exactly three tries"
+end
