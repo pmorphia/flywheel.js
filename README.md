@@ -54,7 +54,27 @@ npx flywheel-js export report.fw report.html   # write the value the program ret
 npx flywheel-js debug main.fw                  # print the returned value and run time
 npx flywheel-js serve page.fw --port 8080      # serve the returned page
 npx flywheel-js repl
+npx flywheel-js --error main.fw                # the last error main.fw stopped with (-E)
 ```
+
+An uncaught error prints a traceback in the Flywheel compiler's format: the error, then where it
+was thrown and each call that led there, each with its source line and the failing range marked
+(`^` under the operator, call, or member, `~` under the rest of its expression). Recursion is
+folded, and output is colored on a terminal (`NO_COLOR=1` turns it off, `FORCE_COLOR=1` on):
+
+```
+Flywheel runtime error: NumericError: division by zero
+  at main.fw:2:14 in divide
+    2 | return a // b
+      |        ~~^^~~
+  at main.fw:13:7 in <module>
+   13 | print divide(1, 0)
+      |       ^^^^^^^^^^^^
+```
+
+`--error` prints the last error a file stopped with again, with its locations but not its source
+lines. Records are kept in `$XDG_STATE_HOME/flywheel.js/errors` (by default `~/.local/state`;
+`%LOCALAPPDATA%` on Windows); `-s` code is not recorded.
 
 Commands take the compiler's short aliases: `r` (run), `c` (check), `e` (export), `db` (debug), `s` (serve), `d` (desktop), `h`/`help`/`--help`, and `v`/`version`/`--version` (`npx flywheel-js r main.fw`). `build`, `test`, `format`, `doc`, `lsp`, and `update` (and their aliases) need the Flywheel compiler and say so.
 
@@ -63,10 +83,11 @@ Commands take the compiler's short aliases: `r` (run), `c` (check), `e` (export)
 | | |
 |---|---|
 | `Flywheel.run(code, opts)` | Runs a program and returns `{ status, value, html, text, served, window, interp }`. `value` is an element when the program returns one, serves `/`, or opens a `desktop.window`. Render it with `interp.render(value)`. |
-| `opts` | `print(line)`, `error(line)`, `stdin` (array of lines for `input()`), `name` (file name used in messages), `args` (array for `os.args()`), `maxSteps` |
+| `opts` | `print(line)`, `error(line)`, `stdin` (array of lines for `input()`), `name` (file name used in messages), `args` (array for `os.args()`), `maxSteps`, `color` (ANSI colors in tracebacks), `diagnostic(report)` (receives tracebacks and compile errors as plain objects instead of `error` receiving their text) |
+| `Flywheel.formatDiagnostic(report, { color, source })` | The text of a report: `{ kind: "runtime" \| "compile", type, message, frames: [{ file, fn, line, col, sline, scol, eline, ecol, text }] }`, innermost frame first. `line:col` is the failing node, `sline:scol`..`eline:ecol` its expression, `text` the source line; `source: false` leaves the source lines out. |
 | `Flywheel.parse(code, name)` | Parses only. Throws `Flywheel.CompileError` with `line` and `col`. |
 | `new Flywheel.Session(opts)` | A REPL session whose `exec(code)` keeps its variables between calls. |
-| `interp.callFromHost(fn, args)` | Calls a Flywheel function, such as an `onclick={f}` handler, after the run. It returns an error string or `null`. |
+| `interp.callFromHost(fn, args)` | Calls a Flywheel function, such as an `onclick={f}` handler, after the run. It returns the error's traceback text (or passes the report to `opts.diagnostic`) or `null`. |
 | `Flywheel.version` | `"2.11 (beta-11) flywheel.js"` |
 
 ## Tests

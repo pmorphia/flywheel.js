@@ -36,5 +36,17 @@ for (const file of fs.readdirSync(exDir).filter(f => f.endsWith(".fw")).sort()) 
     console.log(`  first difference at line ${i + 1}:\n  - ${a[i]}\n  + ${b[i]}`);
   }
 }
+// Tracebacks: the failing range of every frame, as the compiler prints it.
+{
+  n++;
+  const lines = [];
+  const code = "function divide(int a, int b) returns int\n    return a // b\nend\nprint divide(1, 0)\n";
+  const r = Flywheel.run(code, { name: "trace.fw", print: () => {}, error: s => lines.push(s) });
+  const want = "Flywheel runtime error: NumericError: division by zero\n  at trace.fw:2:14 in divide\n" +
+    "    2 | return a // b\n      |        ~~^^~~\n  at trace.fw:4:7 in <module>\n    4 | print divide(1, 0)\n" +
+    "      |       ^^^^^^^^^^^^";
+  if (r.status === 1 && lines.join("\n") === want) console.log("ok   traceback");
+  else { failed++; console.log(`FAIL traceback\n${lines.join("\n")}`); }
+}
 console.log(`\n${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);
