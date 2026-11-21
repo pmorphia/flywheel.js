@@ -142,7 +142,7 @@ function showLast(file) {
   return 0;
 }
 // Run options: diagnostics are printed here and recorded for --error.
-const runOptions = s => ({ name: s.name, stdin: readStdin(), args: s.args, color,
+const runOptions = s => ({ name: s.name, file: s.file ? path.resolve(s.file) : s.name, stdin: readStdin(), args: s.args, color,
   diagnostic: r => { console.error(Flywheel.formatDiagnostic(r, { color, shownPath })); record(s.file, r); } });
 const render = r => r.value instanceof Flywheel.FwElement ? r.interp.render(r.value) : r.html != null ? r.html : null;
 const flag = (args, f, d) => { const i = args.indexOf(f); if (i < 0) return d; const v = args[i + 1]; args.splice(i, 2); return v; };

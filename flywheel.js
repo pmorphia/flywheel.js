@@ -15,6 +15,9 @@
  */
 (function (root) {
 "use strict";
+// This interpreter's version, and the Flywheel version whose semantics it follows
+// (the __version__ and __flywheel__ built-in names).
+const VERSION_NUMBER = "2.11", LANGUAGE_VERSION = "2.26";
 
 /* =========================================================================================
  * errors and control signals
@@ -1877,6 +1880,43 @@ class Scope {
  * interpreter
  * ========================================================================================= */
 class Interp {
+  // Built-in names (Flywheel docs/language.md#built-in-names): facts about the program and the
+  // implementation running it, found after every declaration so a program's own name wins.
+  // undefined when `e` is not one.
+  builtinName(e) {
+    const name = e.name;
+    if (!/^__\w+__$/.test(name)) return undefined;
+    const node = typeof process !== "undefined" && process.versions && process.versions.node && typeof require === "function";
+    const file = () => {
+      const f = this.opts.file || this.mainName || "main.fw";
+      if (!node || f.startsWith("<") || f.includes("://")) return f;
+      const path = require("path");
+      let full = path.resolve(f);
+      try { full = require("fs").realpathSync(full); } catch (err) { /* a file that is gone keeps its path */ }
+      return full;
+    };
+    switch (name) {
+      case "__file__": return file();
+      case "__dir__": {
+        const f = file();
+        if (!node) return "";
+        if (f.startsWith("<") || f.includes("://")) return process.cwd();
+        return require("path").dirname(f);
+      }
+      case "__line__": return BigInt(e.line || this.line || 0);
+      case "__args__": return this.argv.slice();
+      case "__version__": return VERSION_NUMBER;
+      case "__flywheel__": return LANGUAGE_VERSION;
+      case "__impl__": return "js";
+      case "__os__":
+        if (!node) return "browser";
+        return { win32: "windows", darwin: "macos", linux: "linux" }[process.platform] || process.platform;
+      case "__arch__":
+        if (!node) return "unknown";
+        return { x64: "x86_64", arm64: "arm64", ia32: "x86", arm: "arm", riscv64: "riscv64" }[process.arch] || process.arch;
+    }
+    return undefined;
+  }
   constructor(opts) {
     this.opts = opts;
     this.argv = (opts.args || []).slice();
@@ -2711,6 +2751,8 @@ class Interp {
         const s = scope.lookup(e.name);
         if (s) { const v = s.vars.get(e.name); return v instanceof NegAlias ? !s.vars.get(v.target) : v; }
         if (this.builtins.has(e.name)) return this.builtins.get(e.name);
+        const special = this.builtinName(e);
+        if (special !== undefined) return special;
         this.line = e.line || this.line;
         fail("RuntimeError", `unknown name '${e.name}'`);
       }
@@ -4481,7 +4523,7 @@ class Session {
   exec(source) { return this.I.run(source, "repl", true); }
 }
 
-const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, formatDiagnostic, compileReport, excerptParts, version: "2.11 (beta-11) flywheel.js" };
+const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, formatDiagnostic, compileReport, excerptParts, version: VERSION_NUMBER + " (beta-11) flywheel.js" };
 root.Flywheel = api;
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : typeof globalThis !== "undefined" ? globalThis : this);
