@@ -1,0 +1,44 @@
+# Built-in vectors, slices, named arguments, and the new assignment forms (Flywheel 2.29).
+var spawn = <vector3 x=1 y=2 z=3>
+var goal = vector3(x=4, y=2, z=5)
+print spawn, goal, spawn == vector3(1, 2, 3)
+
+# Methods return a new vector; `.=` moves the vector itself.
+var player = vector2()
+player .= north(2)
+player .= east()
+player.x++
+print player, player.manhattan(vector2()), player.neighbors().length
+
+# `a:b` walks every cell from one vector to another, both ends included.
+print <vector2 x=0 y=0>:<vector2 x=2 y=2>
+var steps = spawn:goal
+print steps.length, steps[1], steps[steps.length - 1] == goal
+
+# 4D: ana and kata move along w.
+print vector4().ana(3).kata().forward()
+
+# Slices of integers: a:b counts from a up to b (not included).
+var text = "hello world"
+int[] xs = [1, 2, 3, 4, 5, 6]
+print text[:5], text[6:], text[::-1], xs[1:3], xs[-2:], xs[::2]
+slice evens = 0:10:2
+print evens, evens.to_array(), 4 in evens, xs[evens]
+int total = 0
+for i in 1:11 do
+    total += i
+end
+print total
+
+# Named arguments: in any order after the positional ones.
+function banner(string text, string fill = "-", int width = 20) returns string
+    var side = fill * ((width - text.length - 2) // 2)
+    return "{side} {text} {side}"
+end
+print banner("vectors", width=16), banner(fill="=", text="slices")
+
+# Powers and increments
+int n = 2
+n **= 10
+n--
+print n, 3 ** 4, 2.0 ** -2

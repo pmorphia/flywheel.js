@@ -45,11 +45,13 @@ const ERROR_TYPES = ["Error", "RuntimeError", "FileError", "InputError", "Proces
 const KEYWORDS = new Set(("if else while do for in end break continue return try catch finally throw and or not " +
   "var const function returns class component interface enum extends implements match case import as is this " +
   "attr super null true false defer readonly elements which unless otherwise").split(" "));
-const OPS = ["..<", "//=", "..", "//", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", "=>", "??",
-  "+", "-", "*", "/", "%", "<", ">", "=", "(", ")", "[", "]", "{", "}", ",", ".", ":", ";", "?", "\\"];
+const OPS = ["..<", "//=", "**=", "..", "//", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", "=>", "??",
+  ".=", "**", "+", "-", "*", "/", "%", "<", ">", "=", "(", ")", "[", "]", "{", "}", ",", ".", ":", ";", "?", "@", "\\"];
 // a line ending in one of these continues onto the next line
 const CONTINUES = new Set(["+", "-", "*", "/", "//", "%", "==", "!=", "<=", ">=", "and", "or", "otherwise", "..", "..<",
-  "=", "+=", "-=", "*=", "/=", "//=", "%=", "=>", ",", "\\", "not"]);
+  "=", "+=", "-=", "*=", "/=", "//=", "%=", "**", "**=", ".=", "=>", ",", "\\", "not"]);
+// `<vector3 x=1 y=2 z=3>` is a vector value, written like a void element
+const VECTOR_TAG = /^vector[234]$/;
 const VOID_TAGS = new Set("area base br col embed hr img input link meta param source track wbr".split(" "));
 const BOOL_ATTRS = new Set(("allowfullscreen async autofocus autoplay checked controls default defer disabled " +
   "formnovalidate hidden inert ismap itemscope loop multiple muted nomodule novalidate open playsinline readonly " +
@@ -134,6 +136,15 @@ function tokenize(S, start, stop) {
     }
     if (c === '"') { const r = lexString(S, i, '"'); push("str", r.parts, i, r.end); i = r.end; continue; }
     if (c === "'") { const r = lexChar(S, i); push("char", r.v, i, r.end); i = r.end; continue; }
+    // `x++` / `x--` (after a name, `)` or `]`, ending the statement) and `++x` / `--x` (starting a
+    // statement) are increments; elsewhere `--` stays two minus signs (`a--b`)
+    if ((c === "+" || c === "-") && src[i + 1] === c) {
+      const after = i + 2 < src.length ? src[i + 2] : "\n", lt = last();
+      const ends = /[ \t\r\n;#]/.test(after);
+      const postfix = lt && !spaceBefore && ends && (lt.t === "id" || (lt.t === "op" && (lt.v === ")" || lt.v === "]")));
+      const prefix = (!lt || lt.t === "nl" || (lt.t === "kw" && (lt.v === "do" || lt.v === "else"))) && isIdStart(after);
+      if (postfix || prefix) { push("op", c + c, i, i + 2); i += 2; continue; }
+    }
     let op = null;
     for (const o of OPS) if (src.startsWith(o, i)) { op = o; break; }
     if (!op) throw S.err(`unexpected character '${c}'`, i);
@@ -263,7 +274,7 @@ function lexMarkup(S, i) {
       }
     } else attrs.push({ name, v: null });
   }
-  if (VOID_TAGS.has(tag) || S.voids.has(tag)) return { node: { k: "El", tag, attrs, children: [], off: s0 }, end: j };
+  if (VOID_TAGS.has(tag) || S.voids.has(tag) || VECTOR_TAG.test(tag)) return { node: { k: "El", tag, attrs, children: [], off: s0 }, end: j };
   const r = lexChildren(S, j, tag, tag === "style" || tag === "script");
   return { node: { k: "El", tag, attrs, children: r.children, off: s0 }, end: r.end, implicit: r.implicit };
 }
@@ -316,13 +327,15 @@ function lexChildren(S, j, tag, raw) {
 /* =========================================================================================
  * parser
  * ========================================================================================= */
+// `a:b` (a slice, or a class's `operator :`) binds looser than everything but comparisons;
+// `a ** b` tighter than unary minus on its left (-2 ** 2 is -4), and right associative
 const BIN = {
-  "or": 1, "and": 2, "==": 3, "!=": 3, "<": 4, "<=": 4, ">": 4, ">=": 4, "in": 4, "is": 4,
-  "otherwise": 5, "..": 6, "..<": 6, "+": 7, "-": 7, "*": 8, "/": 8, "//": 8, "%": 8, "as": 9,
+  "or": 1, "and": 2, "==": 3, "!=": 3, "<": 4, "<=": 4, ">": 4, ">=": 4, "in": 4, "is": 4, ":": 5,
+  "otherwise": 6, "..": 7, "..<": 7, "+": 8, "-": 8, "*": 9, "/": 9, "//": 9, "%": 9, "as": 10, "**": 11,
 };
 const UNIT_NUMBERS = new Set("int float double i8 i16 i32 i64 u8 u16 u32 u64 f32 f64".split(" "));
 const PRIM_TYPES = new Set("int float double string bool char void element fragment i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 any".split(" "));
-const ASSIGN_OPS = new Set(["=", "+=", "-=", "*=", "/=", "//=", "%="]);
+const ASSIGN_OPS = new Set(["=", "+=", "-=", "*=", "/=", "//=", "%=", "**="]);
 
 /* =========================================================================================
  * diagnostics: tracebacks and compile errors with source excerpts, as the Flywheel compiler and
@@ -511,6 +524,37 @@ class Parser {
     throw this.err(`expected end of statement, got ${this.desc(this.peek())}`);
   }
   withNL(n, f) { const s = this.skipNL; this.skipNL = n; try { return f(); } finally { this.skipNL = s; } }
+  // Map literal keys and subscript slice parts end at ':' instead of reading `a:b`.
+  withColon(stop, f) { const s = this.colonStop; this.colonStop = stop; try { return f(); } finally { this.colonStop = s; } }
+  // Arguments in parentheses, up to the `)`: expressions, then `name=value` named arguments.
+  callArgs() {
+    const a = [];
+    while (!this.op(")")) {
+      if (this.is("id") && this.op("=", 1)) {
+        const n = this.next(); this.next();
+        a.push({ k: "Named", name: n.v, e: this.expr(), line: this.line(n) });
+      } else {
+        const at = this.peek(), v = this.expr();
+        if (a.length && a[a.length - 1].k === "Named") throw this.err("positional arguments come before named ones (name=value)", at);
+        a.push(v);
+      }
+      if (!this.accept("op", ",")) break;
+    }
+    this.expect("op", ")");
+    return a;
+  }
+  // `x[i]`, or a slice: `x[a:b]`, `x[a:b:step]`, with any part left out (`x[:3]`, `x[::-1]`).
+  subscript() {
+    const part = () => this.op(":") || this.op("]") ? null : this.withColon(true, () => this.expr());
+    const at = this.peek(), first = part();
+    if (!this.op(":")) { if (!first) throw this.err("expected an index", at); return first; }
+    this.usesPrelude = true;
+    this.next();
+    const stop = part();
+    let step = null;
+    if (this.accept("op", ":")) step = part();
+    return { k: "Slice", start: first, stop, step, line: this.line(at) };
+  }
 
   /* ---------------- program / blocks */
   program() {
@@ -623,7 +667,11 @@ class Parser {
     const tk = this.peek();
     if (this.modifierAhead()) {
       if (/^(protected|static)$/.test(tk.v)) throw this.err(`'${tk.v}' applies to class members`);
-      this.next(); return this.statementInner();
+      this.next();
+      const st = this.statementInner();
+      // a private declaration is hidden from importing modules
+      if (st && tk.v === "private") st.private = true;
+      return st;
     }
     // `void component Name = ...`: `void` is a soft keyword before `component`
     if (tk.t === "id" && tk.v === "void" && this.is("kw", "component", 1)) { this.next(); return this.compDecl(true); }
@@ -642,6 +690,10 @@ class Parser {
       // class decorators are called with the class where it is declared; results are discarded
       for (let i = decos.length - 1; i >= 0; i--) (this.pending = this.pending || []).push({ k: "Expr", e: { k: "Call", callee: decos[i], args: [{ k: "Ident", name: c.name, line: c.line }], line: c.line }, line: c.line });
       return c;
+    }
+    // `struct Name` on its own line: a value type (`struct` is a soft keyword)
+    if (tk.t === "id" && tk.v === "struct" && this.is("id", undefined, 1) && (this.is("nl", undefined, 2) || this.is("eof", undefined, 2))) {
+      const c = this.classDecl(); c.isStruct = true; return c;
     }
     if (tk.t === "kw") {
       switch (tk.v) {
@@ -812,11 +864,40 @@ class Parser {
       if (!alias && !/^[A-Za-z_]\w*$/.test(base)) throw this.S.err(`'${base}' is not a valid module name; add \`as name\``, itk.s);
       return { k: "Import", path: spec, alias: alias || base, file: true };
     }
-    let path = this.name(), wildcard = false, alias = null;
-    while (this.accept("op", ".")) { if (this.accept("op", "*")) { wildcard = true; break; } path += "." + this.name(); }
-    if (this.accept("kw", "as")) alias = this.name();
+    // A leading `.` starts at the importing file's directory and each further dot goes up one
+    // (`import ..shared.util`); `@` starts at the project root. `import ui.{button, slider as s}`
+    // imports several modules of ui.
+    let prefix = "";
+    while ((this.op(".") || this.op("..") || this.op("@")) && (!prefix || !this.peek().sp)) {
+      const t = this.next();
+      if (t.v === "@" && prefix) throw this.err("'@' (the project root) starts an import name", t);
+      prefix += t.v;
+      if (prefix[0] === "@" && this.op(".") && !this.peek().sp) throw this.err("write `import @lib.util`, with no '.' after '@'");
+    }
+    const out = [];
+    const group = head => {
+      do {
+        while (this.is("nl")) this.next();
+        if (this.op("}")) break;
+        entry(head);
+        while (this.is("nl")) this.next();
+      } while (this.accept("op", ","));
+      this.expect("op", "}");
+    };
+    const entry = head => {
+      let path = head + this.name(), wildcard = false, alias = null;
+      while (this.accept("op", ".")) {
+        if (this.accept("op", "*")) { wildcard = true; break; }
+        if (this.accept("op", "{")) return group(path + ".");
+        path += "." + this.name();
+      }
+      if (this.accept("kw", "as")) alias = this.name();
+      out.push({ k: "Import", path, wildcard, alias, line: this.line(itk) });
+    };
+    this.withNL(1, () => { if (prefix && this.accept("op", "{")) group(prefix); else entry(prefix); });
     this.endStmt();
-    return { k: "Import", path, wildcard, alias };
+    if (out.length > 1) (this.pending = this.pending || []).push(...out.slice(1));
+    return out[0];
   }
   strPlain(tk) {
     if (!(tk.v.length === 1 && typeof tk.v[0] === "string") && tk.v.length !== 0) throw this.err("expected a plain string", tk);
@@ -848,6 +929,8 @@ class Parser {
     }
     const tparams = this.skipTypeParams();
     const params = this.params();
+    // unary minus is `operator -()`, apart from binary `operator -(other)`
+    if (name === "operator -" && !params.length) name = "operator -()";
     let ret = null;
     if (this.accept("kw", "returns")) ret = this.type();
     return { name, params, ret, tparams, line: this.line(kwTk) };
@@ -1231,7 +1314,34 @@ class Parser {
   }
   exprStatement() {
     const tk = this.peek();
+    // `++x` / `--x` and `x++` / `x--` add or subtract 1: `x += 1`
+    if (this.op("++") || this.op("--")) {
+      const op = this.next(), target = this.outerExpr(true);
+      if (!/^(Ident|Member|Index|InstField)$/.test(target.k)) throw this.err("invalid assignment target", tk);
+      this.endStmt();
+      return { k: "Assign", target, op: op.v === "++" ? "+=" : "-=", value: { k: "Lit", v: 1n } };
+    }
+    const start = this.idx(0);
     const e = this.outerExpr(true);
+    if (this.op("++") || this.op("--")) {
+      const op = this.next();
+      if (!/^(Ident|Member|Index|InstField)$/.test(e.k)) throw this.err("invalid assignment target", tk);
+      this.endStmt();
+      return { k: "Assign", target: e, op: op.v === "++" ? "+=" : "-=", value: { k: "Lit", v: 1n } };
+    }
+    if (this.op(".=")) {
+      // `x .= f(a)` is `x = x.f(a)`: the target's tokens are read again before the member
+      const at = this.idx(0), op = this.next();
+      if (!this.is("id")) throw this.err("'.=' expects a member after it, such as 'name .= upper()'", op);
+      const copy = this.toks.slice(start, at).filter(t => t.t !== "nl").map(t => ({ ...t }));
+      copy.push({ t: "op", v: ".", s: op.s, e: op.s + 1, sp: false });
+      this.toks[this.idx(0)] = { ...this.toks[this.idx(0)], sp: false };
+      this.toks.splice(this.p, 0, ...copy);
+      if (!/^(Ident|Member|Index|InstField)$/.test(e.k)) throw this.err("invalid assignment target", tk);
+      const value = this.outerExpr();
+      this.endStmt();
+      return { k: "Assign", target: e, op: "=", value };
+    }
     if (this.is("op") && ASSIGN_OPS.has(this.peek().v)) {
       const op = this.next().v;
       const value = this.outerExpr();
@@ -1321,7 +1431,7 @@ class Parser {
     }
     if (tk.t === "op" && (tk.v === "-" || tk.v === "+")) {
       this.next();
-      const operand = this.infix(this.unary(), 9);
+      const operand = this.infix(this.unary(), 10);
       return this.span({ k: "Unary", op: tk.v, e: operand, line: this.line(tk) }, tk.s);
     }
     if (tk.t === "kw" && tk.v === "not") { this.next(); return this.span({ k: "Not", e: this.expr(2), line: this.line(tk) }, tk.s); }
@@ -1330,6 +1440,7 @@ class Parser {
   binOp() {
     const t = this.peek();
     if (t.t === "op" && t.v === "??") throw this.err("'??' was renamed to 'otherwise': write 'a otherwise b'");
+    if (t.t === "op" && t.v === ":" && this.colonStop) return null;
     if (t.t === "op" && t.v in BIN) return t.v;
     if (t.t === "kw" && (t.v === "and" || t.v === "or" || t.v === "in" || t.v === "is" || t.v === "as" || t.v === "otherwise")) return t.v;
     return null;
@@ -1354,7 +1465,8 @@ class Parser {
         left = this.span(ops.length === 1 ? { k: "Bin", op, l: items[0], r: items[1], line } : { k: "Chain", ops, items, line }, s0, tk.s);
         continue;
       }
-      const right = this.expr(prec);
+      if (op === ":" || op === "**") this.usesPrelude = true;
+      const right = this.expr(op === "**" ? prec - 1 : prec);
       left = this.span(op === "and" || op === "or" ? { k: "Logic", op, l: left, r: right, line } : { k: "Bin", op, l: left, r: right, line }, s0, tk.s);
     }
   }
@@ -1401,23 +1513,25 @@ class Parser {
         break;
       case "op":
         if (tk.v === "(") {
-          return this.withNL(1, () => { const e = this.expr(); this.expect("op", ")"); return { k: "Paren", e }; });
+          return this.withColon(false, () => this.withNL(1, () => { const e = this.expr(); this.expect("op", ")"); return { k: "Paren", e }; }));
         }
         if (tk.v === "[") {
-          return this.withNL(1, () => {
+          return this.withColon(false, () => this.withNL(1, () => {
             const items = [];
             while (!this.op("]")) { items.push(this.expr()); if (!this.accept("op", ",")) break; }
             this.expect("op", "]");
             return { k: "List", items, line };
-          });
+          }));
         }
         if (tk.v === "{") {
-          return this.withNL(1, () => {
+          // `{a: b}` is a map entry, not the slice a:b
+          const key = () => this.withColon(true, () => this.expr());
+          return this.withColon(false, () => this.withNL(1, () => {
             if (this.accept("op", "}")) return { k: "EmptyBraces", line };
-            const first = this.expr();
+            const first = key();
             if (this.accept("op", ":")) {
               const entries = [[first, this.expr()]];
-              while (this.accept("op", ",")) { if (this.op("}")) break; const k = this.expr(); this.expect("op", ":"); entries.push([k, this.expr()]); }
+              while (this.accept("op", ",")) { if (this.op("}")) break; const k = key(); this.expect("op", ":"); entries.push([k, this.expr()]); }
               this.expect("op", "}");
               return { k: "MapLit", entries, line };
             }
@@ -1425,7 +1539,7 @@ class Parser {
             while (this.accept("op", ",")) { if (this.op("}")) break; items.push(this.expr()); }
             this.expect("op", "}");
             return { k: "SetLit", items, line };
-          });
+          }));
         }
     }
     throw this.err(`expected an expression, got ${this.desc(tk)}`, tk);
@@ -1473,19 +1587,14 @@ class Parser {
       if (t.v === "(") {
         if (head && t.sp) return e;
         this.next();
-        const args = this.withNL(1, () => {
-          const a = [];
-          while (!this.op(")")) { a.push(this.expr()); if (!this.accept("op", ",")) break; }
-          this.expect("op", ")");
-          return a;
-        });
+        const args = this.withColon(false, () => this.withNL(1, () => this.callArgs()));
         e = this.span({ k: "Call", callee: e, args, line: this.line(t) }, s0);
         continue;
       }
       if (t.v === "[") {
         if (t.sp && (head || e.k === "Lit")) return e;
         this.next();
-        const index = this.withNL(1, () => { const i = this.expr(); this.expect("op", "]"); return i; });
+        const index = this.withColon(false, () => this.withNL(1, () => { const i = this.subscript(); this.expect("op", "]"); return i; }));
         e = this.span({ k: "Index", e, index, line: this.line(t) }, s0);
         continue;
       }
@@ -1518,6 +1627,25 @@ class Parser {
   markup(n) {
     if (n.k === "Text") return n;
     if (n.k === "Toks") return { k: "MExpr", e: this.sub(n.toks) };
+    if (n.k === "El" && VECTOR_TAG.test(n.tag)) {
+      // `<vector2 x=1 y={n}>` is the call vector2(x=1, y=n): whole numbers, or {expression}
+      const at = { s: n.off }, dims = Number(n.tag[6]), line = this.S.pos(n.off).line;
+      const args = n.attrs.map(a => {
+        if (a.name.length !== 1 || "xyzw".indexOf(a.name) < 0 || "xyzw".indexOf(a.name) >= dims)
+          throw this.err(`${n.tag} has the components ${"xyzw".slice(0, dims)}, not '${a.name}'`, at);
+        let e;
+        if (a.v && a.v.k === "Toks") e = this.sub(a.v.toks);
+        else {
+          const text = a.v && a.v.parts.length === 1 && typeof a.v.parts[0] === "string" ? a.v.parts[0] : null;
+          if (text === null || !/^[+-]?[0-9]+$/.test(text))
+            throw this.err(`<${n.tag}> component '${a.name}' must be a whole number or {expression}, such as ${a.name}=3`, at);
+          e = { k: "Lit", v: BigInt(text) };
+        }
+        return { k: "Named", name: a.name, e, line };
+      });
+      if (n.children.length) throw this.err(`<${n.tag}> is a value and holds no children`, at);
+      return { k: "Call", callee: { k: "Ident", name: n.tag, line }, args, line };
+    }
     const attrs = n.attrs.map(a => ({
       name: a.name,
       v: a.v === null ? null : a.v.k === "Toks" ? this.sub(a.v.toks) : this.strNode(a.v.parts),
@@ -1550,6 +1678,8 @@ class FwFunc {
   }
 }
 class Bound { constructor(fn, self) { this.fn = fn; this.self = self; } }
+// An argument left out by name (`f(a, c=1)` skips b): the callee uses the parameter's default
+const ABSENT = Symbol("absent");
 class Native { constructor(name, fn) { this.name = name; this.fn = fn; } }
 class FwClass {
   constructor(name) {
@@ -1563,6 +1693,16 @@ const TASK = new FwClass("thread.task");
 class FwEnum { constructor(name) { this.name = name; this.members = []; this.byName = new Map(); } }
 class EnumMember { constructor(en, name, index, fields) { this.en = en; this.name = name; this.index = index; this.fields = fields; this.value = null; } }
 class Module { constructor(name, members) { this.name = name; this.members = members; } }
+// The public names of a module written in Flywheel, read from its scope as they are now: a
+// global the module changes later reads changed through the module too.
+class LiveMembers {
+  constructor(vars, hidden) { this.vars = vars; this.hidden = hidden; }
+  has(k) { return !this.hidden.has(k) && this.vars.has(k); }
+  get(k) { return this.has(k) ? this.vars.get(k) : undefined; }
+  set(k, v) { this.vars.set(k, v); return this; }
+  *[Symbol.iterator]() { for (const [k, v] of this.vars) if (!this.hidden.has(k)) yield [k, v]; }
+  keys() { return [...this].map(([k]) => k)[Symbol.iterator](); }
+}
 class Component { constructor(name, node, scope, isVoid) { this.name = name; this.node = node; this.scope = scope; this.isVoid = isVoid; } }
 class JsonVal { constructor(v) { this.v = v; } }
 class Window { constructor(title) { this.title = title; this.tree = null; } }
@@ -1869,6 +2009,33 @@ unitconv 1speed.fps = 0.3048metric.speed.mps
 /* =========================================================================================
  * scopes
  * ========================================================================================= */
+/* Files, for imports of local modules: Node's fs when it is there, or opts.readFile and
+ * opts.isDirectory / opts.listDirectory (a browser can serve its own files this way). */
+const nodeFs = (() => { try { return typeof require === "function" ? require("fs") : null; } catch (e) { return null; } })();
+const pathJoin = (...parts) => {
+  const out = [];
+  let absolute = false;
+  parts.filter(p => p !== "").forEach((p, i) => {
+    if (i === 0 && /^([A-Za-z]:)?[\\/]/.test(p)) absolute = true;
+    for (const seg of p.split(/[\\/]+/)) {
+      if (seg === "" || seg === ".") continue;
+      if (seg === ".." && out.length && out[out.length - 1] !== "..") out.pop();
+      else out.push(seg);
+    }
+  });
+  const j = out.join("/");
+  return absolute && !/^[A-Za-z]:/.test(j) ? "/" + j : j || ".";
+};
+const editDistance = (a, b) => {
+  let row = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return row[b.length];
+};
+const pathDir = p => { const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")); return i < 0 ? "." : i === 0 ? "/" : p.slice(0, i); };
 class Scope {
   constructor(parent, frame) { this.vars = new Map(); this.parent = parent; this.frame = frame || (parent && parent.frame) || null; }
   lookup(name) { for (let s = this; s; s = s.parent) if (s.vars.has(name)) return s; return null; }
@@ -1935,6 +2102,11 @@ class Interp {
     this.steps = 0;
     this.maxSteps = opts.maxSteps || 0;
     this.rng = mulberry32((Math.random() * 2 ** 32) >>> 0);
+    this.readFile = opts.readFile || (nodeFs ? p => { try { return nodeFs.readFileSync(p, "utf8"); } catch (e) { return null; } } : null);
+    this.isDirectory = opts.isDirectory || (nodeFs ? p => { try { return nodeFs.statSync(p).isDirectory(); } catch (e) { return false; } } : () => false);
+    this.listDirectory = opts.listDirectory || (nodeFs ? p => { try { return nodeFs.readdirSync(p); } catch (e) { return []; } } : () => []);
+    this.fileModules = new Map();   // path -> Module, or null while it loads (a cycle)
+    this.currentFile = null;        // the module file being loaded
     this.installBuiltins();
   }
 
@@ -2045,7 +2217,7 @@ class Interp {
       switch (st.k) {
         case "Func": scope.def(st.name, new FwFunc(st.name, st.params, st.body, scope)); break;
         case "Interface": { const c = new FwClass(st.name); c.isInterface = true; c.sigs = st.sigs; scope.def(st.name, c); break; }
-        case "Class": { const c = new FwClass(st.name); c.decl = st; scope.def(st.name, c); break; }
+        case "Class": { const c = new FwClass(st.name); c.decl = st; c.isStruct = !!st.isStruct; scope.def(st.name, c); break; }
         case "Enum": scope.def(st.name, this.makeEnum(st, scope)); break;
         case "Component": this.components.set(st.name, new Component(st.name, st.node, scope, st.isVoid)); break;
         case "Import": this.doImport(st, scope); break;
@@ -2061,8 +2233,15 @@ class Interp {
     for (const st of stmts) if (st.k === "Class") { const c = scope.get(st.name); mro(c); this.allFields(c); }
   }
   typeRef(name, scope) {
-    const v = name.split(".").reduce((acc, part, i) => i === 0 ? scope.get(part) : acc && this.member(acc, part), null);
+    const v = name.split(".").reduce((acc, part, i) => i === 0 ? (scope.lookup(part) ? scope.get(part) : this.preludeName(part)) : acc && this.member(acc, part), null);
     return v;
+  }
+  // The built-in vector2/3/4 and slice types (stdlib/fw/_prelude.fw), loaded when first used.
+  // A program's own names hide them.
+  preludeName(name) {
+    if (!/^(vector[234]|slice|__\w+)$/.test(name)) return undefined;
+    if (!this.modules._prelude) this.loadLibrary("_prelude");
+    return this.modules._prelude.members.get(name);
   }
   buildClass(c, st, scope) {
     for (const name of st.bases || []) {
@@ -2139,7 +2318,20 @@ class Interp {
   }
   doImport(st, scope) {
     if (st.native) throw new FwThrow(new FwError("NativeError", `native imports (import ${st.native === "cxx" ? "c++" : st.native}) are not available in flywheel.js; install Flywheel to compile ${st.native === "cxx" ? "C++" : st.native === "c" ? "C" : st.native === "rust" ? "Rust" : "Zig"} code`));
-    if (st.file) throw new FwThrow(new FwError("RuntimeError", `importing files and URLs ('${st.path}') is not available in flywheel.js; install Flywheel to use them`));
+    const relative = /^[.@]/.test(st.path) && !st.file;
+    const file = this.findModuleFile(st);
+    if (file) {
+      const mod = this.loadFileModule(file);
+      if (st.wildcard) { for (const [k, v] of mod.members) scope.def(k, v); return; }
+      const name = st.alias || (st.file ? st.path.split(/[\\/]/).pop().replace(/\.(fw|fly)$/, "") : st.path.split(/[.@]/).pop());
+      scope.def(name, mod);
+      return;
+    }
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(st.path)) throw new FwThrow(new FwError("RuntimeError", `importing URLs ('${st.path}') is not available in flywheel.js; install Flywheel to use them`));
+    if (st.file || relative) {
+      if (!this.readFile || !this.mainFile()) throw new FwThrow(new FwError("RuntimeError", `importing files ('${st.path}') needs files: run flywheel.js in Node, or pass the readFile option`));
+      throw new FwThrow(new FwError("RuntimeError", this.missingModule(st)));
+    }
     const root = st.path.split(".")[0];
     if (UNIT_LIBRARIES[root] && !st.wildcard) this.loadUnitLibrary(root, st.alias || root, true);
     if (root === "metric" || root === "imperial") { scope.def(st.alias || root, new Module(root, new Map())); return; }
@@ -2156,11 +2348,112 @@ class Interp {
     if (!mod) {
       const native = ["io", "net", "thread", "sqlite", "compress", "crypto", "gc", "toml", "yaml", "csv", "url", "log", "args", "bigint", "decimal"];
       if (native.includes(root)) throw new FwThrow(new FwError("RuntimeError", `module '${root}' is not available in flywheel.js; install Flywheel to use it`));
-      throw new FwThrow(new FwError("RuntimeError", `module '${st.path}' not found (searched library and built-in modules; flywheel.js cannot load installed packages from .flywheel-modules: install Flywheel and Pulley to use them)`));
+      const hint = this.readFile && this.mainFile() ? (/; did you mean .*$/.exec(this.missingModule(st)) || [""])[0] : "";
+      throw new FwThrow(new FwError("RuntimeError", `module '${st.path}' not found (searched ${this.readFile && this.mainFile() ? "local .fw and .fly files, " : ""}library and built-in modules; flywheel.js cannot load installed packages from .flywheel-modules: install Flywheel and Pulley to use them)${hint}`));
     }
     if (st.wildcard && (root === "html" || root === "svg")) { scope.def(root, mod); return; }    // tag sets
     if (st.wildcard) { for (const [k, v] of mod.members) scope.def(k, v); return; }
     scope.def(st.alias || root, mod);
+  }
+
+  // The main file, absolute when it was named (opts.file).
+  mainFile() { return this.opts.file && /[\\/]/.test(this.opts.file) ? this.opts.file : null; }
+  // `import @name`: the nearest directory at or above the main file with a pulley.toml, or the
+  // main file's directory.
+  projectRoot() {
+    const start = pathDir(this.mainFile());
+    for (let d = start; ; d = pathDir(d)) {
+      if (this.readFile(pathJoin(d, "pulley.toml")) !== null) return d;
+      if (pathDir(d) === d) return start;
+    }
+  }
+  // A module in `dir`: rel.fw or rel.fly, or a directory module rel/ holding rel.fw, main.fw, or
+  // lib.fw (or the `main` of its pulley.toml).
+  moduleIn(dir, rel, directories) {
+    for (const ext of [".fw", ".fly"]) { const p = pathJoin(dir, rel + ext); if (this.readFile(p) !== null) return p; }
+    const folder = pathJoin(dir, rel);
+    if (!directories || !this.isDirectory(folder)) return null;
+    const toml = this.readFile(pathJoin(folder, "pulley.toml"));
+    const main = toml && /^\s*main\s*=\s*["']([^"']+)["']/m.exec(toml);
+    for (const name of [main && main[1], folder.split("/").pop() + ".fw", "main.fw", "lib.fw"])
+      if (name && this.readFile(pathJoin(folder, name)) !== null) return pathJoin(folder, name);
+    return null;
+  }
+  // [directory, rest] of a relative name: `.x` (the importing file's directory), `..x.y` (one up
+  // per extra dot), `@x.y` (the project root).
+  relativeBase(name) {
+    if (name[0] === "@") return [this.projectRoot(), name.slice(1)];
+    let dots = 0; while (name[dots] === ".") dots++;
+    let base = pathDir(this.currentFile || this.mainFile());
+    for (let i = 1; i < dots; i++) base = pathDir(base);
+    return [base, name.slice(dots)];
+  }
+  // The file an import names, or null for library and built-in modules.
+  findModuleFile(st) {
+    const from = this.currentFile || this.mainFile();
+    if (!this.readFile || !from || /^[a-z][a-z0-9+.-]*:\/\//i.test(st.path)) return null;
+    if (st.file) {
+      let spec = st.path;
+      const dirs = spec.startsWith("@/") ? [this.projectRoot()] : /^([A-Za-z]:)?[\\/]/.test(spec) ? [""] : [pathDir(from), pathDir(this.mainFile())];
+      if (spec.startsWith("@/")) spec = spec.slice(2);
+      for (const d of dirs) for (const ext of /\.(fw|fly)$/.test(spec) ? [""] : [".fw", ".fly"]) {
+        const p = d ? pathJoin(d, spec + ext) : spec + ext;
+        if (this.readFile(p) !== null) return p;
+      }
+      return null;
+    }
+    if (/^[.@]/.test(st.path)) {
+      const [base, rest] = this.relativeBase(st.path);
+      return this.moduleIn(base, rest.replace(/\./g, "/"), true);
+    }
+    // local modules first, as in the compiler; a directory never takes a library module's name
+    const root = st.path.split(".")[0], rel = st.path.replace(/\./g, "/");
+    const library = !!(FW_LIBRARIES[root] || UNIT_LIBRARIES[root] || this.modules[root] || root === "metric" || root === "imperial");
+    for (const d of new Set([pathDir(from), pathDir(this.mainFile())])) {
+      const found = this.moduleIn(d, rel, !library);
+      if (found && found !== from) return found;
+    }
+    return null;
+  }
+  // "module '.x' not found (...)", with a close spelling when there is one.
+  missingModule(st) {
+    let base, rest = st.path;
+    if (/^[.@]/.test(st.path) && !st.file) [base, rest] = this.relativeBase(st.path);
+    else base = pathDir(this.currentFile || this.mainFile());
+    const parts = rest.split(st.file ? /[\\/]/ : "."), last = parts.pop(), folder = pathJoin(base, parts.join("/"));
+    let best = null, bestDistance = Math.floor(last.length / 3) + 3;
+    for (const entry of this.listDirectory(folder)) {
+      if (entry[0] === ".") continue;
+      const stem = entry.replace(/\.(fw|fly)$/, "");
+      if (stem === last || (stem === entry && !this.isDirectory(pathJoin(folder, entry)))) continue;
+      const d = editDistance(stem, last);
+      if (d < bestDistance) { bestDistance = d; best = stem; }
+    }
+    const where = st.file ? "" : ` (looked for ${pathJoin(base, rest.replace(/\./g, "/"))}.fw, .fly, and a ${last}/ directory module)`;
+    return `module '${st.path}' not found${where}` + (best ? `; did you mean '${st.path.slice(0, st.path.length - last.length)}${best}'?` : "");
+  }
+  // A module file: run once in its own scope; its public declarations are the module's members.
+  loadFileModule(file) {
+    if (this.fileModules.has(file)) {
+      const m = this.fileModules.get(file);
+      if (!m) fail("RuntimeError", `import cycle: ${file} imports itself through ${this.currentFile}`);
+      return m;
+    }
+    this.fileModules.set(file, null);
+    const prog = parse(this.readFile(file), file);
+    const scope = new Scope(this.global, null);
+    const before = new Set(this.components.keys()), saved = this.currentFile, savedLine = this.line;
+    const name = file.split("/").pop().replace(/\.(fw|fly)$/, "");
+    this.currentFile = file;
+    try {
+      this.hoist(prog, scope);
+      for (const [k, c] of [...this.components]) if (!before.has(k)) this.components.set(name + "." + k, c);
+      for (const st of prog) if (st.k !== "Component") this.execStmt(st, scope);
+    } finally { this.currentFile = saved; this.line = savedLine; }
+    const hidden = new Set(prog.filter(st => st.private).map(st => st.name));
+    const mod = new Module(name, new LiveMembers(scope.vars, hidden));
+    this.fileModules.set(file, mod);
+    return mod;
   }
 
   /* ---------------- statements */
@@ -2613,6 +2906,7 @@ class Interp {
       }
       case "InstField": {
         const self = this.self(scope);
+        if (self.cls.isStruct) fail("TypeError", `struct methods work on a copy of ${self.cls.name}; return a new value instead of assigning this.${t.name}`);
         if (!self.f.has(t.name) && !this.allFields(self.cls).some(f => f.name === t.name)) fail("RuntimeError", `${self.cls.name} has no field '${t.name}'`);
         this.checkAccess(self.cls, t.name, "field");
         self.f.set(t.name, st.op === "=" ? compute() : compute(self.f.get(t.name)));
@@ -2622,6 +2916,17 @@ class Interp {
       case "Member": {
         const root = this.assignRoot(t, scope);
         const obj = this.eval(t.e, scope);
+        if (obj instanceof Instance && obj.cls.isStruct) {
+          // a struct value never changes: a field write stores a changed copy where it came from
+          if (!/^(Ident|Member|Index|InstField)$/.test(t.e.k)) fail("TypeError", "a field of a temporary struct cannot be assigned");
+          if (!this.allFields(obj.cls).some(f => f.name === t.name)) fail("RuntimeError", `${obj.cls.name} has no field '${t.name}'`);
+          const field = this.allFields(obj.cls).find(f => f.name === t.name);
+          const copy = new Instance(obj.cls);
+          copy.f = new Map(obj.f);
+          copy.f.set(t.name, this.coerce(st.op === "=" ? compute() : compute(obj.f.get(t.name)), field.type));
+          this.assign({ target: t.e, op: "=", value: { k: "$Val", v: copy } }, scope);
+          return;
+        }
         const old = st.op === "=" ? undefined : this.member(obj, t.name);
         this.setMember(obj, t.name, st.op === "=" ? compute() : compute(old));
         this.notifyField(t.name);
@@ -2753,6 +3058,8 @@ class Interp {
         if (this.builtins.has(e.name)) return this.builtins.get(e.name);
         const special = this.builtinName(e);
         if (special !== undefined) return special;
+        const built = this.preludeName(e.name);
+        if (built !== undefined) return built;
         this.line = e.line || this.line;
         fail("RuntimeError", `unknown name '${e.name}'`);
       }
@@ -2837,7 +3144,7 @@ class Interp {
         if (typeof v === "bigint") return ck(-v);
         if (typeof v === "number") return -v;
         if (v instanceof Quantity) return new Quantity(v.ns, typeof v.amount === "bigint" ? ck(-v.amount) : -v.amount, v.unit);
-        if (v instanceof Instance) { const m = findMethod(v.cls, "operator -"); if (m && m.params.length === 0) return this.call(new Bound(m, v), []); }
+        if (v instanceof Instance) { const m = findMethod(v.cls, "operator -()"); if (m) return this.call(new Bound(m, v), []); }
         fail("RuntimeError", `cannot negate ${this.typeName(v)}`);
       }
       case "Not": {
@@ -2895,6 +3202,15 @@ class Interp {
         this.line = e.line || this.line;
         return this.member(obj, e.name);
       }
+      case "$Val": return e.v;
+      case "Named": this.line = e.line || this.line; fail("TypeError", `named arguments (${e.name}=...) work in calls of functions, methods, and constructors`);
+      case "Slice": {
+        // xs[a:b:step] with parts left out: __slice_of(a, b, step, open_start, open_stop)
+        const part = (x, d) => x ? this.eval(x, scope) : d;
+        const args = [part(e.start, 0n), part(e.stop, 0n), part(e.step, 1n), !e.start, !e.stop];
+        this.line = e.line || this.line;
+        return this.call(this.preludeName("__slice_of"), args);
+      }
       case "Index": {
         const obj = this.eval(e.e, scope);
         if (e.index.k === "Bin" && (e.index.op === ".." || e.index.op === "..<")) {
@@ -2906,6 +3222,14 @@ class Interp {
       }
       case "Call": {
         this.line = e.line || this.line;
+        if (e.args.some(a => a.k === "Named")) {
+          // `f(1, step=2)`: the callee's parameter names place the named arguments
+          const f = e.callee.k === "Member" ? this.member(this.eval(e.callee.e, scope), e.callee.name) : this.eval(e.callee, scope);
+          const positional = [], named = [];
+          for (const a of e.args) if (a.k === "Named") named.push([a.name, this.eval(a.e, scope)]); else positional.push(this.eval(a, scope));
+          this.line = e.line || this.line;
+          return this.call(f, this.bindNamed(f, positional, named));
+        }
         if (e.callee.k === "Member") {
           const obj = this.eval(e.callee.e, scope);
           const args = e.args.map(a => this.eval(a, scope));
@@ -2952,6 +3276,11 @@ class Interp {
   /* ---------------- operators */
   binary(op, a, b) {
     if ((a instanceof Quantity || b instanceof Quantity) && /^([+\-*/%]|\/\/|[=!<>]=|[<>])$/.test(op)) return this.unitBinary(op, a, b);
+    // `2 * v`: a number on the left of a struct uses the struct's operator, as v * 2
+    if ((op === "*" || op === "+") && isNum(a) && b instanceof Instance && b.cls.isStruct) {
+      const m = findMethod(b.cls, "operator " + op);
+      if (m) return this.call(new Bound(m, b), [a]);
+    }
     if (a instanceof Instance && !(op === "==" || op === "!=") ) {
       const name = "operator " + (op === ">" || op === "<=" || op === ">=" ? op : op);
       let m = findMethod(a.cls, name);
@@ -2967,6 +3296,20 @@ class Interp {
       if (op !== "in") fail("RuntimeError", `${a.cls.name} has no operator ${op}`);
     }
     switch (op) {
+      case "**":
+        if (typeof a === "bigint" && typeof b === "bigint") {
+          if (b < 0n) fail("ValueError", `an integer power needs an exponent of 0 or more; write double(${a}) ** ${b}`);
+          let result = 1n, base = a, left = b;
+          while (left > 0n) { if (left & 1n) result = ck(result * base); left >>= 1n; if (left > 0n) base = ck(base * base); }
+          return result;
+        }
+        if (!isNum(a) || !isNum(b)) fail("CastError", `operator '**' requires numbers, got ${this.typeName(a)} and ${this.typeName(b)}`);
+        return Math.pow(Number(a), Number(b));
+      case ":":
+        // `a:b` with integers is a slice: a, a+1, ... up to (not including) b
+        if (typeof a !== "bigint" || typeof b !== "bigint")
+          fail("CastError", `':' makes a slice of two integers, such as 1:5, or calls an operator : that a class or struct declares; got ${this.typeName(a)} and ${this.typeName(b)}`);
+        return this.call(this.preludeName("slice"), [a, b]);
       case "==": return this.eq(a, b);
       case "!=": return !this.eq(a, b);
       case "<": return this.cmp(a, b) < 0;
@@ -3044,6 +3387,8 @@ class Interp {
     if (a instanceof Instance) {
       const m = findMethod(a.cls, "operator ==") || findMethod(a.cls, "equals");
       if (m && b instanceof Instance) return !!this.call(new Bound(m, a), [b]);
+      // structs compare field by field
+      if (a.cls.isStruct && b instanceof Instance && b.cls === a.cls) return [...a.f].every(([k, v]) => this.deepEq(v, b.f.get(k)));
       return false;
     }
     if (a instanceof Tuple && b instanceof Tuple) return a.items.length === b.items.length && a.items.every((x, i) => this.eq(x, b.items[i]));
@@ -3070,6 +3415,11 @@ class Interp {
     fail("CastError", `cannot compare ${this.typeName(a)} and ${this.typeName(b)}`);
   }
   contains(coll, x) {
+    if (coll instanceof Instance) {
+      // `x in object` asks a class or struct with contains(x): `i in 0:10`
+      const m = findMethod(coll.cls, "contains");
+      if (m) { const r = this.call(new Bound(m, coll), [x]); if (typeof r !== "boolean") fail("TypeError", "contains must return bool for `in`"); return r; }
+    }
     if (typeof coll === "string") {
       if (x instanceof FwChar) return coll.includes(String(x));
       if (typeof x === "string") return coll.includes(x);
@@ -3109,6 +3459,8 @@ class Interp {
 
   /* ---------------- indexing and members */
   index(obj, idx) {
+    if (idx instanceof Instance && (Array.isArray(obj) || typeof obj === "string") && idx.cls === this.preludeName("slice"))
+      return this.call(this.preludeName(typeof obj === "string" ? "__slice_string" : "__slice_array"), [obj, idx]);
     if (Array.isArray(obj)) return obj[this.idxNum(idx, obj.length)];
     if (obj instanceof Tuple) return obj.items[this.idxNum(idx, obj.items.length)];
     if (typeof obj === "string") {
@@ -3226,6 +3578,31 @@ class Interp {
   }
 
   /* ---------------- calls */
+  // Named arguments moved to their parameters' positions; a parameter left out before a later
+  // given one is ABSENT, which the callee treats as not passed.
+  bindNamed(f, positional, named) {
+    let params, what;
+    if (f instanceof Bound || f instanceof FwFunc) {
+      const fn = f instanceof Bound ? f.fn : f;
+      params = fn.params; what = fn.cls && fn.name !== "lambda" ? `${fn.cls.name}.${fn.name}` : fn.name;
+    } else if (f instanceof FwClass) {
+      const init = findMethod(f, "init");
+      params = init ? init.params : this.allFields(f).map(x => ({ name: x.name, def: x.def || true })); what = f.name;
+    } else fail("TypeError", "named arguments (name=value) work in calls of functions, methods, and constructors");
+    if (positional.length > params.length) fail("TypeError", `too many arguments to ${what}`);
+    const out = positional.slice(), given = positional.map(() => true);
+    for (const [name, v] of named) {
+      const at = params.findIndex(p => p.name === name);
+      if (at < 0) fail("TypeError", `${what} has no parameter '${name}'${params.length ? ` (it takes ${params.map(p => p.name).join(", ")})` : ""}`);
+      if (given[at]) fail("TypeError", `argument '${name}' is given twice`);
+      given[at] = true; out[at] = v;
+    }
+    for (let i = 0; i < out.length; i++) if (!given[i]) {
+      if (!params[i].def && !(f instanceof FwClass)) fail("TypeError", `missing argument '${params[i].name}' to ${what}`);
+      out[i] = ABSENT;
+    }
+    return out;
+  }
   call(f, args) {
     this.tick();
     if (f instanceof Bound) return this.invoke(f.fn, args, f.self);
@@ -3254,7 +3631,7 @@ class Interp {
     if (args.length > ps.length) fail("RuntimeError", `${fn.name} takes ${ps.length} argument${ps.length === 1 ? "" : "s"}, got ${args.length}`);
     for (let i = 0; i < ps.length; i++) {
       let v;
-      if (i < args.length) v = args[i];
+      if (i < args.length && args[i] !== ABSENT) v = args[i];
       else if (ps[i].def) v = this.eval(ps[i].def, fn.closure);
       else fail("RuntimeError", `${fn.name} is missing argument '${ps[i].name}'`);
       s.def(ps[i].name, this.coerce(v, ps[i].type));
@@ -3299,7 +3676,7 @@ class Interp {
     const fields = this.allFields(cls);
     if (args.length > fields.length) fail("RuntimeError", `${cls.name} takes at most ${fields.length} arguments, got ${args.length}`);
     fields.forEach((f, i) => {
-      if (i < args.length) o.f.set(f.name, this.coerce(args[i], f.type));
+      if (i < args.length && args[i] !== ABSENT) o.f.set(f.name, this.coerce(args[i], f.type));
       else if (!o.f.has(f.name)) {
         if (f.def) o.f.set(f.name, this.coerce(this.eval(f.def, cls.scope), f.type));
         else fail("RuntimeError", `${cls.name}(...) is missing required field '${f.name}'`);
@@ -3411,8 +3788,9 @@ class Interp {
       if (v instanceof FwSet) return "{" + v.items().map(x => this.show(x, true, seen)).join(", ") + "}";
       if (v instanceof ResultVal) return `Result.${v.ok ? "ok" : "error"}(${this.show(v.v, true, seen)})`;
       if (v instanceof Instance) {
-        const ts = !nested && findMethod(v.cls, "to_string");
-        if (ts) return this.call(new Bound(ts, v), []);
+        // inside collections too, as the compiler and Flywheel Lite print them
+        const ts = findMethod(v.cls, "to_string");
+        if (ts && !ts.params.length) return this.call(new Bound(ts, v), []);
         return `${v.cls.name}(${this.allFields(v.cls).map(f => `${f.name}=${this.show(v.f.get(f.name), true, seen)}`).join(", ")})`;
       }
       if (v instanceof Window) return "desktop.window";
@@ -3655,7 +4033,8 @@ Interp.prototype.loadLibrary = function (name) {
   for (const st of prog) if (st.k !== "Component") this.execStmt(st, scope);
   this.line = saved;
   const hidden = new Set(prog.filter(st => st.private || st.isPrivate || (st.mods && st.mods.private)).map(st => st.name));
-  this.modules[name] = new Module(name, new Map([...scope.vars].filter(([k]) => !hidden.has(k))));
+  hidden.delete(undefined);
+  this.modules[name] = new Module(name, new LiveMembers(scope.vars, hidden));
 };
 // `import metric` / `imperial` / `time`: their namespaces become visible under the import's name.
 Interp.prototype.loadUnitLibrary = function (name, alias, visible) {
@@ -4479,6 +4858,8 @@ const FW_LIBRARIES = {
 /* BEGIN LIBRARIES */
   cogwheel: "# Cogwheel: configuration written as Markdown (.cw files).\n#\n# A .cw file is ordinary Markdown. Headings (`#` to `######`) open nested sections named by\n# their text, a quote line with `=` in it (`> name = danny`) is an entry, and everything else is\n# text. Fenced code blocks are text. Reading and writing a file keeps it as written: only the\n# entries you change are rewritten.\n#\n#     import cogwheel\n#     var conf = cogwheel.confile(\"main.cw\")\n#     print conf[\"#Main\"][\"#User Section\"][\">name\"]\n#     print conf.getById(\"User Section\").get(\"name\")\n#     print conf.selectorAll()[\">email\"]\n#\n# See https://github.com/pmorphia/cogwheel for the format.\nimport fs\n\nelements cogwheel_markup\n    cw-doc: *\n    cw-heading: name\n    cw-rawstr: *\n    cw-conf void: key, value\nend\n\n# Markup that builds a document: <cogwheel.cw><cogwheel.heading name=\"Main\">\n# <cogwheel.rawstr>Text</cogwheel.rawstr><cogwheel.conf key=\"name\" value=\"danny\">\n# </cogwheel.heading></cogwheel.cw>. `cogwheel.from_markup` turns it into a Node.\ncomponent cw = <cw-doc>{attr inner}</cw-doc>\ncomponent heading = <cw-heading name={attr name}>{attr inner}</cw-heading>\ncomponent rawstr = <cw-rawstr>{attr inner}</cw-rawstr>\ncomponent conf = <cw-conf key={attr key} value={attr value} />\n\n# A part of a document. `kind` is \"document\", \"section\", \"entry\", \"text\", or \"all\" (the view\n# returned by selectorAll, which searches every level).\nclass Node\n    string kind\n    # A section's heading text, or an entry's key.\n    string name = \"\"\n    # An entry's value.\n    string value = \"\"\n    # A section's heading level (1 to 6); 0 for the document.\n    int level = 0\n    # The source text of this node itself, with its line breaks: a heading line, an entry\n    # line, or the lines of a text block. Empty for an entry or heading that was changed.\n    string raw = \"\"\n    Node[] children = []\n    # The file a document was read from.\n    string file = \"\"\n\n    # `[\"#Name\"]` is the section named Name, `[\">key\"]` (or `[\"key\"]`) the entry key. Missing\n    # parts raise KeyError.\n    function operator [](string selector) returns Node\n        var found = this.find(selector)\n        if found == null do\n            throw KeyError(\"no {describe(selector)} in {this.label()}\")\n        end\n        return found\n    end\n\n    # The first match of a selector, or null.\n    function find(string selector) returns Node?\n        var want = parse_selector(selector)\n        bool deep = this.kind == \"all\"\n        return search(this.children, want[0], want[1], deep)\n    end\n\n    function has(string selector) returns bool\n        return this.find(selector) != null\n    end\n\n    # Every match of a selector, at this level (or every level, for selectorAll).\n    function find_all(string selector) returns Node[]\n        var want = parse_selector(selector)\n        Node[] out = []\n        collect(this.children, want[0], want[1], this.kind == \"all\", out)\n        return out\n    end\n\n    # The section with this name at any depth.\n    function getById(string id) returns Node\n        var found = search(this.children, \"section\", id.trim(), true)\n        if found == null do\n            throw KeyError(\"no section '{id}' in {this.label()}\")\n        end\n        return found\n    end\n    function get_by_id(string id) returns Node\n        return this.getById(id)\n    end\n\n    # A view of this node whose selectors search every level below it.\n    function selectorAll returns Node\n        return Node(\"all\", this.name, \"\", this.level, \"\", [this])\n    end\n    function selector_all returns Node\n        return this.selectorAll()\n    end\n\n    # Entry values. get raises KeyError when the entry is missing.\n    function get(string key) returns string\n        return this[entry_selector(key)].value\n    end\n    function get_or(string key, string fallback) returns string\n        var found = this.find(entry_selector(key))\n        if found == null do\n            return fallback\n        end\n        return found.value\n    end\n    function get_int(string key) returns int\n        var v = this.get(key).replace(\"_\", \"\")\n        try\n            return int(v)\n        catch Error e\n            throw ValueError(\"cogwheel entry '{key}' is not an integer: {v}\")\n        end\n    end\n    function get_float(string key) returns double\n        var v = this.get(key).replace(\"_\", \"\")\n        try\n            return double(v)\n        catch Error e\n            throw ValueError(\"cogwheel entry '{key}' is not a number: {v}\")\n        end\n    end\n    function get_bool(string key) returns bool\n        var v = this.get(key).lower()\n        if v == \"true\" or v == \"yes\" or v == \"on\" or v == \"1\" do\n            return true\n        end\n        if v == \"false\" or v == \"no\" or v == \"off\" or v == \"0\" do\n            return false\n        end\n        throw ValueError(\"cogwheel entry '{key}' is not true or false: {v}\")\n    end\n    # A comma-separated value, optionally in brackets: `> tags = [a, b, c]`.\n    function get_list(string key) returns string[]\n        return split_list(this.get(key))\n    end\n\n    # The sections, entries, and text blocks directly inside this one.\n    function sections returns Node[]\n        return this.children.filter(function(Node n) => n.kind == \"section\")\n    end\n    function entries returns Node[]\n        return this.children.filter(function(Node n) => n.kind == \"entry\")\n    end\n    function keys returns string[]\n        return this.entries().map(function(Node n) => n.name)\n    end\n    # The text directly in this section (or a text block's own text), without entries.\n    function text returns string\n        if this.kind == \"text\" do\n            return this.raw.trim()\n        end\n        string[] parts = []\n        for child in this.children do\n            if child.kind == \"text\" and child.raw.trim() != \"\" do\n                parts.push(child.raw.trim())\n            end\n        end\n        return \"\\n\\n\".join(parts)\n    end\n\n    # Sets an entry of this section, adding it after the last entry (or the text) when missing.\n    function set(string key, string value) returns Node\n        var found = this.find(entry_selector(key))\n        if found != null do\n            var n = found\n            n.value = value\n            n.raw = \"\"\n            return this\n        end\n        if this.kind == \"all\" do\n            throw ValueError(\"set needs a section, not a selectorAll view\")\n        end\n        int at = 0\n        for i, child in this.children do\n            if child.kind == \"section\" do\n                break\n            end\n            at = i + 1\n        end\n        Node[] added = [Node(\"entry\", key.trim(), value)]\n        this.insert_block(at, added)\n        return this\n    end\n\n    # Adds a subsection at the end of this one and returns it.\n    function add_section(string name) returns Node\n        var section = Node(\"section\", name.trim(), \"\", min_level(this.level + 1))\n        this.insert_block(this.children.length, [section])\n        return section\n    end\n\n    # Adds a text block (a paragraph) after the entries and text of this section.\n    function add_text(string text) returns Node\n        int at = 0\n        for i, child in this.children do\n            if child.kind == \"section\" do\n                break\n            end\n            at = i + 1\n        end\n        this.insert_block(at, [Node(\"text\", \"\", \"\", 0, text.trim() + \"\\n\")])\n        return this\n    end\n\n    # Removes the first match of a selector; whether there was one.\n    function remove(string selector) returns bool\n        var want = parse_selector(selector)\n        return remove_from(this, want[0], want[1], this.kind == \"all\")\n    end\n\n    # Every entry at every level, keyed by section path and key: \"Main.User Section.name\".\n    function to_map returns map<string, string>\n        map<string, string> out = {}\n        flatten(this, \"\", out)\n        return out\n    end\n\n    # The .cw text of this node: a document or section as written (with any changes), an\n    # entry's line, a text block's lines.\n    function source returns string\n        string out = \"\"\n        if this.kind == \"all\" do\n            return this.children[0].source()\n        end\n        if this.kind == \"section\" do\n            out = this.raw if this.raw != \"\" else \"#\".repeat(this.level) + \" \" + this.name + \"\\n\"\n        else if this.kind == \"document\" do\n            out = this.raw\n        else if this.kind == \"entry\" do\n            return this.raw if this.raw != \"\" else entry_line(this.name, this.value)\n        else if this.kind == \"text\" do\n            return this.raw\n        end\n        for child in this.children do\n            out += child.source()\n        end\n        return out\n    end\n\n    # Writes a document to a file: the one it was read from when no path is given.\n    function save(string path = \"\") returns void\n        var target = path if path != \"\" else this.file\n        if target == \"\" do\n            throw ValueError(\"save needs a path for a document that was not read from a file\")\n        end\n        fs.write(target, this.source())\n    end\n\n    # An entry formats as its value, a text block as its text, anything else as .cw text.\n    function to_string returns string\n        if this.kind == \"entry\" do\n            return this.value\n        end\n        if this.kind == \"text\" do\n            return this.text()\n        end\n        return this.source()\n    end\n\n    function label returns string\n        if this.kind == \"section\" do\n            return \"section '{this.name}'\"\n        end\n        if this.kind == \"all\" do\n            return this.children[0].label()\n        end\n        if this.file != \"\" do\n            return this.file\n        end\n        return \"the document\"\n    end\n\n    # Inserts nodes at a child position, keeping a blank line between blocks.\n    function insert_block(int at, Node[] nodes) returns void\n        Node[] before = []\n        Node[] after = []\n        for i, child in this.children do\n            if i < at do\n                before.push(child)\n            else do\n                after.push(child)\n            end\n        end\n        bool needs_gap = false\n        if before.length > 0 do\n            var last = before[before.length - 1]\n            needs_gap = not ends_blank(last)\n        else if this.kind == \"section\" do\n            needs_gap = true\n        end\n        if needs_gap and (before.length > 0 or this.kind == \"section\") do\n            before.push(Node(\"text\", \"\", \"\", 0, \"\\n\"))\n        end\n        for n in nodes do\n            before.push(n)\n        end\n        if after.length > 0 and not starts_blank(after[0]) do\n            before.push(Node(\"text\", \"\", \"\", 0, \"\\n\"))\n        end\n        for n in after do\n            before.push(n)\n        end\n        this.children = before\n    end\nend\n\nprivate function min_level(int level) returns int\n    return level if level <= 6 else 6\nend\n\nprivate function ends_blank(Node n) returns bool\n    if n.kind == \"section\" do\n        if n.children.length == 0 do\n            return false\n        end\n        return ends_blank(n.children[n.children.length - 1])\n    end\n    return n.kind == \"text\" and (n.raw.trim() == \"\" or n.raw.ends_with(\"\\n\\n\"))\nend\n\nprivate function starts_blank(Node n) returns bool\n    return n.kind == \"text\" and n.raw.lines().length > 0 and n.raw.lines()[0].trim() == \"\"\nend\n\n# \"#Name\" is a section, \">key\" or \"key\" an entry.\nprivate function parse_selector(string selector) returns string[]\n    var s = selector.trim()\n    if s.starts_with(\"#\") do\n        return [\"section\", s.slice(1).trim()]\n    end\n    if s.starts_with(\">\") do\n        return [\"entry\", s.slice(1).trim()]\n    end\n    return [\"entry\", s]\nend\n\nprivate function entry_selector(string key) returns string\n    var k = key.trim()\n    return k if k.starts_with(\">\") else \">\" + k\nend\n\nprivate function describe(string selector) returns string\n    var want = parse_selector(selector)\n    return \"{want[0]} '{want[1]}'\"\nend\n\nprivate function search(Node[] nodes, string kind, string name, bool deep) returns Node?\n    for n in nodes do\n        if n.kind == kind and n.name == name do\n            return n\n        end\n    end\n    if deep do\n        for n in nodes do\n            if n.kind == \"section\" or n.kind == \"document\" do\n                var found = search(n.children, kind, name, true)\n                if found != null do\n                    return found\n                end\n            end\n        end\n    end\n    return null\nend\n\nprivate function collect(Node[] nodes, string kind, string name, bool deep, Node[] out) returns void\n    for n in nodes do\n        if n.kind == kind and n.name == name do\n            out.push(n)\n        end\n        if deep and (n.kind == \"section\" or n.kind == \"document\") do\n            collect(n.children, kind, name, true, out)\n        end\n    end\nend\n\nprivate function remove_from(Node parent, string kind, string name, bool deep) returns bool\n    for i, n in parent.children do\n        if n.kind == kind and n.name == name do\n            Node[] kept = []\n            for j, other in parent.children do\n                if j != i do\n                    kept.push(other)\n                end\n            end\n            parent.children = kept\n            return true\n        end\n    end\n    if deep do\n        for n in parent.children do\n            if (n.kind == \"section\" or n.kind == \"document\") and remove_from(n, kind, name, true) do\n                return true\n            end\n        end\n    end\n    return false\nend\n\nprivate function flatten(Node n, string prefix, map<string, string> out) returns void\n    for child in n.children do\n        if child.kind == \"entry\" do\n            out[prefix + child.name] = child.value\n        else if child.kind == \"section\" do\n            flatten(child, prefix + child.name + \".\", out)\n        else if child.kind == \"document\" do\n            flatten(child, prefix, out)\n        end\n    end\nend\n\nprivate function split_list(string value) returns string[]\n    var v = value.trim()\n    if v.starts_with(\"[\") and v.ends_with(\"]\") do\n        v = v.slice(1, v.length - 1)\n    end\n    string[] out = []\n    if v.trim() == \"\" do\n        return out\n    end\n    # split on commas outside quotes\n    string item = \"\"\n    bool quoted = false\n    bool escaped = false\n    for c in v do\n        if escaped do\n            escaped = false\n        else if quoted and c == '\\\\' do\n            escaped = true\n        else if c == '\"' do\n            quoted = not quoted\n        else if c == ',' and not quoted do\n            out.push(unquote(item))\n            item = \"\"\n            continue\n        end\n        item += string(c)\n    end\n    out.push(unquote(item))\n    return out\nend\n\n# A value is written as is, or in double quotes when it has surrounding spaces, quotes, or\n# line breaks: `> greeting = \"  hi\\n\"`.\nfunction quote(string value) returns string\n    bool plain = value == value.trim() and value != \"\" and not value.starts_with(\"\\\"\") and\n        not value.contains(\"\\n\") and not value.contains(\"\\r\")\n    if plain do\n        return value\n    end\n    var escaped = value.replace(\"\\\\\", \"\\\\\\\\\").replace(\"\\\"\", \"\\\\\\\"\").replace(\"\\n\", \"\\\\n\")\n    escaped = escaped.replace(\"\\r\", \"\\\\r\").replace(\"\\t\", \"\\\\t\")\n    return \"\\\"\" + escaped + \"\\\"\"\nend\n\n# The value an entry's text stands for: quoted values have their escapes read.\nfunction unquote(string text) returns string\n    var t = text.trim()\n    if t.length < 2 or not t.starts_with(\"\\\"\") or not t.ends_with(\"\\\"\") do\n        return t\n    end\n    var chars = t.slice(1, t.length - 1).chars()\n    string out = \"\"\n    int i = 0\n    while i < chars.length do\n        var c = chars[i]\n        if c == '\\\\' and i + 1 < chars.length do\n            i += 1\n            var e = chars[i]\n            if e == 'n' do\n                out += \"\\n\"\n            else if e == 't' do\n                out += \"\\t\"\n            else if e == 'r' do\n                out += \"\\r\"\n            else do\n                out += string(e)\n            end\n        else do\n            out += string(c)\n        end\n        i += 1\n    end\n    return out\nend\n\nprivate function entry_line(string key, string value) returns string\n    return \"> {key} = {quote(value)}\\n\"\nend\n\n# The heading level and text of a line (`## Name`), or level 0.\nprivate function heading_of(string line) returns string[]\n    var t = line.trim_start()\n    if line.length - t.length > 3 or not t.starts_with(\"#\") do\n        return [\"0\", \"\"]\n    end\n    int level = 0\n    while level < t.length and t[level] == '#' do\n        level += 1\n    end\n    if level > 6 or (level < t.length and t[level] != ' ' and t[level] != '\\t') do\n        return [\"0\", \"\"]\n    end\n    var name = t.slice(level).trim()\n    # an optional closing sequence: `## Name ##`\n    var stripped = name\n    while stripped.ends_with(\"#\") do\n        stripped = stripped.slice(0, stripped.length - 1)\n    end\n    if stripped == \"\" or stripped.ends_with(\" \") or stripped.ends_with(\"\\t\") do\n        name = stripped.trim()\n    end\n    return [string(level), name]\nend\n\n# The key and value of an entry line (`> key = value`), or an empty key.\nprivate function entry_of(string line) returns string[]\n    var t = line.trim_start()\n    if line.length - t.length > 3 or not t.starts_with(\">\") do\n        return [\"\", \"\"]\n    end\n    var body = t.slice(1)\n    var eq = body.find(\"=\")\n    if eq < 0 do\n        return [\"\", \"\"]\n    end\n    var key = body.slice(0, eq).trim()\n    if key == \"\" do\n        return [\"\", \"\"]\n    end\n    return [key, unquote(body.slice(eq + 1))]\nend\n\n# The fence a line opens or closes (``` or ~~~, three or more), or \"\".\nprivate function fence_of(string line) returns string\n    var t = line.trim_start()\n    if line.length - t.length > 3 do\n        return \"\"\n    end\n    for mark in [\"`\", \"~\"] do\n        if t.starts_with(mark.repeat(3)) do\n            int n = 0\n            while n < t.length and string(t[n]) == mark do\n                n += 1\n            end\n            return mark.repeat(n)\n        end\n    end\n    return \"\"\nend\n\nprivate function split_lines(string text) returns string[]\n    # lines with their line breaks, so the source joins back exactly\n    string[] out = []\n    string current = \"\"\n    for c in text do\n        current += string(c)\n        if c == '\\n' do\n            out.push(current)\n            current = \"\"\n        end\n    end\n    if current != \"\" do\n        out.push(current)\n    end\n    return out\nend\n\n# Reads .cw text.\nfunction parse(string text) returns Node\n    var doc = Node(\"document\")\n    Node[] stack = [doc]\n    string block = \"\"\n    string fence = \"\"\n    var body = text\n    if body.starts_with(\"\\u{FEFF}\") do\n        # kept as the document's own raw text, so it is written back\n        doc.raw = \"\\u{FEFF}\"\n        body = body.slice(1)\n    end\n    for line in split_lines(body) do\n        var bare = line.replace(\"\\r\", \"\").replace(\"\\n\", \"\")\n        if fence != \"\" do\n            block += line\n            var f = fence_of(bare)\n            if f != \"\" and f.starts_with(fence) and bare.trim() == f do\n                fence = \"\"\n            end\n            continue\n        end\n        var f = fence_of(bare)\n        if f != \"\" do\n            fence = f\n            block += line\n            continue\n        end\n        var h = heading_of(bare)\n        var e = entry_of(bare)\n        if h[0] == \"0\" and e[0] == \"\" do\n            block += line\n            continue\n        end\n        var top = stack[stack.length - 1]\n        if block != \"\" do\n            top.children.push(Node(\"text\", \"\", \"\", 0, block))\n            block = \"\"\n        end\n        if h[0] != \"0\" do\n            var level = int(h[0])\n            while stack.length > 1 and stack[stack.length - 1].level >= level do\n                stack.pop()\n            end\n            var section = Node(\"section\", h[1], \"\", level, line)\n            stack[stack.length - 1].children.push(section)\n            stack.push(section)\n        else do\n            top.children.push(Node(\"entry\", e[0], e[1], 0, line))\n        end\n    end\n    if block != \"\" do\n        stack[stack.length - 1].children.push(Node(\"text\", \"\", \"\", 0, block))\n    end\n    return doc\nend\n\n# Reads a .cw file.\nfunction confile(string path) returns Node\n    var doc = parse(fs.read(path))\n    doc.file = path\n    return doc\nend\n\nprivate function markup_source(element e, int depth) returns string\n    if e.tag == \"cw-heading\" do\n        var out = \"#\".repeat(min_level(depth + 1)) + \" \" + (e.get_attribute(\"name\") otherwise \"\") + \"\\n\\n\"\n        for child in e.children do\n            out += markup_source(child, depth + 1)\n        end\n        return out\n    end\n    if e.tag == \"cw-rawstr\" do\n        return e.text_content.trim() + \"\\n\\n\"\n    end\n    if e.tag == \"cw-conf\" do\n        return entry_line(e.get_attribute(\"key\") otherwise \"\", e.get_attribute(\"value\") otherwise \"\") + \"\\n\"\n    end\n    string out = \"\"\n    for child in e.children do\n        out += markup_source(child, depth)\n    end\n    return out\nend\n\n# The .cw text of <cogwheel.cw> markup.\nfunction render(element e) returns string\n    return markup_source(e, 0).trim_end() + \"\\n\"\nend\n\n# A document from <cogwheel.cw> markup.\nfunction from_markup(element e) returns Node\n    return parse(render(e))\nend\n",
   random: "# Pseudo-random numbers, choices, shuffles, and samples.\n# Built on the math module's per-thread generator, so random.seed and math.seed set the same\n# sequence. Not for secrets: use crypto.random_bytes, crypto.token, or crypto.random_int.\nimport math\n\n# Makes the sequence repeatable from `n`.\nfunction seed(int n)\n    math.seed(n)\nend\n\n# A double in [0, 1).\nfunction random returns double\n    return math.random()\nend\n\n# An integer in the inclusive range [low, high].\nfunction integer(int low, int high) returns int\n    if low > high do\n        throw ValueError(\"random.integer requires low <= high\")\n    end\n    return math.random_int(low, high)\nend\n\n# An integer in [0, n), for picking an index.\nfunction below(int n) returns int\n    if n <= 0 do\n        throw ValueError(\"random.below requires a positive bound\")\n    end\n    return math.random_int(0, n - 1)\nend\n\n# A double in [low, high).\nfunction uniform(double low, double high) returns double\n    if low > high do\n        throw ValueError(\"random.uniform requires low <= high\")\n    end\n    return low + (high - low) * math.random()\nend\n\n# true with probability p (0 to 1).\nfunction chance(double p = 0.5) returns bool\n    if p < 0.0 or p > 1.0 do\n        throw ValueError(\"random.chance requires a probability from 0 to 1\")\n    end\n    return math.random() < p\nend\n\n# A normally distributed double (Box-Muller).\nfunction normal(double mean = 0.0, double stddev = 1.0) returns double\n    if stddev < 0.0 do\n        throw ValueError(\"random.normal requires stddev >= 0\")\n    end\n    var u = 1.0 - math.random()\n    var v = math.random()\n    return mean + stddev * math.sqrt(-2.0 * math.log(u)) * math.cos(2.0 * math.PI * v)\nend\n\n# One item, uniformly.\nfunction choice<T>(T[] items) returns T\n    if items.length == 0 do\n        throw IndexError(\"random.choice of an empty array\")\n    end\n    return items[math.random_int(0, items.length - 1)]\nend\n\n# One item, with probability proportional to its weight.\nfunction weighted<T>(T[] items, double[] weights) returns T\n    if items.length == 0 or items.length != weights.length do\n        throw ValueError(\"random.weighted needs one weight per item and at least one item\")\n    end\n    var total = 0.0\n    for w in weights do\n        if w < 0.0 or not math.is_finite(w) do\n            throw ValueError(\"random.weighted requires finite, non-negative weights\")\n        end\n        total += w\n    end\n    if total <= 0.0 do\n        throw ValueError(\"random.weighted requires a positive total weight\")\n    end\n    var target = math.random() * total\n    var last = 0\n    for i, w in weights do\n        if w > 0.0 do\n            last = i\n            if target < w do\n                return items[i]\n            end\n            target -= w\n        end\n    end\n    return items[last]\nend\n\n# Shuffles the array in place (Fisher-Yates).\nfunction shuffle<T>(T[] items)\n    var i = items.length - 1\n    while i > 0 do\n        var j = math.random_int(0, i)\n        var held = items[i]\n        items[i] = items[j]\n        items[j] = held\n        i -= 1\n    end\nend\n\n# A shuffled copy; the array is unchanged.\nfunction shuffled<T>(T[] items) returns T[]\n    var out = items.copy()\n    shuffle(out)\n    return out\nend\n\n# `count` items from distinct positions, in random order.\nfunction sample<T>(T[] items, int count) returns T[]\n    if count < 0 or count > items.length do\n        throw ValueError(\"random.sample count must be from 0 to the array length\")\n    end\n    var pool = items.copy()\n    T[] out = []\n    for i in 0..<count do\n        var j = math.random_int(i, pool.length - 1)\n        var held = pool[i]\n        pool[i] = pool[j]\n        pool[j] = held\n        out.push(pool[i])\n    end\n    return out\nend\n\n# A generator with its own state, for simulations that must replay exactly: give each one a\n# seed and nothing else (including the module's functions above) moves its sequence. Two\n# generators made from the same seed produce the same numbers on every Flywheel flavor.\n# Its state is plain fields, so `deep_copy` of a game state saves the generator with it and\n# restoring the copy replays the same numbers.\n#\n#     var rng = random.Generator(42)\n#     var damage = rng.integer(8, 12)\n#\n# The algorithm is MRG32k3a (L'Ecuyer, 1999): period about 2^191, and every step is integer\n# arithmetic whose products stay below 2^53.\nclass Generator\n    int s10 = 0\n    int s11 = 0\n    int s12 = 0\n    int s20 = 0\n    int s21 = 0\n    int s22 = 0\n\n    constructor(int seed = 0)\n        this.reseed(seed)\n    end\n\n    # Restarts the sequence from `seed`, as if the generator were new.\n    function reseed(int seed)\n        var h = seed % 2147483647\n        if h < 0 do\n            h += 2147483647\n        end\n        if h == 0 do\n            h = 20170921\n        end\n        int[] states = []\n        for i in 0..<6 do\n            h = h * 48271 % 2147483647\n            states.push(h)\n        end\n        this.s10 = states[0]\n        this.s11 = states[1]\n        this.s12 = states[2]\n        this.s20 = states[3]\n        this.s21 = states[4]\n        this.s22 = states[5]\n        for i in 0..<8 do\n            this.step()\n        end\n    end\n\n    # The next raw value, an integer in [1, 4294967087].\n    function step() returns int\n        var p1 = (1403580 * this.s11 - 810728 * this.s10) % 4294967087\n        if p1 < 0 do\n            p1 += 4294967087\n        end\n        this.s10 = this.s11\n        this.s11 = this.s12\n        this.s12 = p1\n        var p2 = (527612 * this.s22 - 1370589 * this.s20) % 4294944443\n        if p2 < 0 do\n            p2 += 4294944443\n        end\n        this.s20 = this.s21\n        this.s21 = this.s22\n        this.s22 = p2\n        if p1 > p2 do\n            return p1 - p2\n        end\n        return p1 - p2 + 4294967087\n    end\n\n    # A double in [0, 1).\n    function random() returns double\n        return double(this.step() - 1) / 4294967087.0\n    end\n\n    # An integer in the inclusive range [low, high].\n    function integer(int low, int high) returns int\n        if low > high do\n            throw ValueError(\"Generator.integer requires low <= high\")\n        end\n        var span = high - low + 1\n        if span > 0 and span <= 4294967087 do\n            return low + int(math.floor(double(this.step() - 1) / 4294967087.0 * double(span)))\n        end\n        # A wider range: 53 random bits from two steps.\n        var bits = math.floor(this.random() * 4294967296.0) * 2097152.0 + math.floor(this.random() * 2097152.0)\n        return low + int(math.floor(bits / 9007199254740992.0 * (double(high) - double(low) + 1.0)))\n    end\n\n    # An integer in [0, n), for picking an index.\n    function below(int n) returns int\n        if n <= 0 do\n            throw ValueError(\"Generator.below requires a positive bound\")\n        end\n        return this.integer(0, n - 1)\n    end\n\n    # A double in [low, high).\n    function uniform(double low, double high) returns double\n        if low > high do\n            throw ValueError(\"Generator.uniform requires low <= high\")\n        end\n        return low + (high - low) * this.random()\n    end\n\n    # true with probability p (0 to 1).\n    function chance(double p = 0.5) returns bool\n        if p < 0.0 or p > 1.0 do\n            throw ValueError(\"Generator.chance requires a probability from 0 to 1\")\n        end\n        return this.random() < p\n    end\n\n    # A normally distributed double (Box-Muller).\n    function normal(double mean = 0.0, double stddev = 1.0) returns double\n        if stddev < 0.0 do\n            throw ValueError(\"Generator.normal requires stddev >= 0\")\n        end\n        var u = 1.0 - this.random()\n        var v = this.random()\n        return mean + stddev * math.sqrt(-2.0 * math.log(u)) * math.cos(2.0 * math.PI * v)\n    end\n\n    # One item, uniformly.\n    function choice<T>(T[] items) returns T\n        if items.length == 0 do\n            throw IndexError(\"Generator.choice of an empty array\")\n        end\n        return items[this.below(items.length)]\n    end\n\n    # One item, with probability proportional to its weight.\n    function weighted<T>(T[] items, double[] weights) returns T\n        if items.length == 0 or items.length != weights.length do\n            throw ValueError(\"Generator.weighted needs one weight per item and at least one item\")\n        end\n        var total = 0.0\n        for w in weights do\n            if w < 0.0 or not math.is_finite(w) do\n                throw ValueError(\"Generator.weighted requires finite, non-negative weights\")\n            end\n            total += w\n        end\n        if total <= 0.0 do\n            throw ValueError(\"Generator.weighted requires a positive total weight\")\n        end\n        var target = this.random() * total\n        var last = 0\n        for i, w in weights do\n            if w > 0.0 do\n                last = i\n                if target < w do\n                    return items[i]\n                end\n                target -= w\n            end\n        end\n        return items[last]\n    end\n\n    # Shuffles the array in place (Fisher-Yates).\n    function shuffle<T>(T[] items)\n        var i = items.length - 1\n        while i > 0 do\n            var j = this.integer(0, i)\n            var held = items[i]\n            items[i] = items[j]\n            items[j] = held\n            i -= 1\n        end\n    end\n\n    # A shuffled copy; the array is unchanged.\n    function shuffled<T>(T[] items) returns T[]\n        var out = items.copy()\n        this.shuffle(out)\n        return out\n    end\n\n    # `count` items from distinct positions, in random order.\n    function sample<T>(T[] items, int count) returns T[]\n        if count < 0 or count > items.length do\n            throw ValueError(\"Generator.sample count must be from 0 to the array length\")\n        end\n        var pool = items.copy()\n        T[] out = []\n        for i in 0..<count do\n            var j = this.integer(i, pool.length - 1)\n            var held = pool[i]\n            pool[i] = pool[j]\n            pool[j] = held\n            out.push(pool[i])\n        end\n        return out\n    end\n\n    # A second generator at the same point in the sequence; the two then move independently.\n    function copy() returns Generator\n        var other = Generator(0)\n        other.s10 = this.s10\n        other.s11 = this.s11\n        other.s12 = this.s12\n        other.s20 = this.s20\n        other.s21 = this.s21\n        other.s22 = this.s22\n        return other\n    end\nend\n",
+  _prelude: "# The built-in vector2, vector3, vector4, and slice types. Every program sees these names without\n# an import, unless it declares or imports something with the same name itself.\n#\n#     var spawn = vector3(1, 2, 3)              # or vector3(x=1, y=2, z=3), or <vector3 x=1 y=2 z=3>\n#     spawn .= up()                             # spawn = spawn.up(): vector3(1, 3, 3)\n#     print \"hello\"[1:4], [1, 2, 3, 4][::-1]    # ell [4, 3, 2, 1]\n#     for p in <vector2 x=0 y=0>:<vector2 x=2 y=1> run print p\n#\n# Vectors hold whole numbers: grid cells, tiles, voxels, and steps. y points up (north), x right\n# (east), z forward, and w ana. For geometry with fractions, use vecmath's Vec2, Vec3, and Vec4.\n# Methods return a new vector; `v .= right(2)` moves v itself.\nimport math\n\n# Marks a slice end left out in a subscript (`xs[2:]`); see slice.positions.\nprivate const int OPEN = -9223372036854775807 - 1\n\nprivate function sign_of(int n) returns int\n    if n > 0 do\n        return 1\n    end\n    return -1 if n < 0 else 0\nend\nprivate function absolute(int n) returns int\n    return -n if n < 0 else n\nend\n\n# The cells from `a` to `b`, both included, one unit step at a time: each step moves along the\n# axis with the most distance left, the later axis first on a tie (w, z, y, then x).\nprivate function steps(int[] a, int[] b) returns int[][]\n    int[][] out = [a.copy()]\n    var at = a.copy()\n    while true do\n        int axis = -1\n        int most = 0\n        for i in 0..<at.length do\n            var left = absolute(b[i] - at[i])\n            if left > 0 and left >= most do\n                most = left\n                axis = i\n            end\n        end\n        if axis < 0 do\n            return out\n        end\n        at[axis] += sign_of(b[axis] - at[axis])\n        out.push(at.copy())\n    end\n    return out\nend\n\nprivate function axis_value(string kind, int[] values, int i) returns int\n    if i < 0 or i >= values.length do\n        throw IndexError(\"{kind} index {i} is out of range 0..<{values.length}\")\n    end\n    return values[i]\nend\n\n# A position or direction in 2D, in whole numbers: <vector2 x=1 y=2>.\nstruct vector2\n    int x = 0\n    int y = 0\n\n    function up(int n = 1) returns vector2\n        return vector2(this.x, this.y + n)\n    end\n    function down(int n = 1) returns vector2\n        return vector2(this.x, this.y - n)\n    end\n    function left(int n = 1) returns vector2\n        return vector2(this.x - n, this.y)\n    end\n    function right(int n = 1) returns vector2\n        return vector2(this.x + n, this.y)\n    end\n    function north(int n = 1) returns vector2\n        return this.up(n)\n    end\n    function south(int n = 1) returns vector2\n        return this.down(n)\n    end\n    function west(int n = 1) returns vector2\n        return this.left(n)\n    end\n    function east(int n = 1) returns vector2\n        return this.right(n)\n    end\n    function movex(int n = 1) returns vector2\n        return vector2(this.x + n, this.y)\n    end\n    function movey(int n = 1) returns vector2\n        return vector2(this.x, this.y + n)\n    end\n\n    function operator +(vector2 other) returns vector2\n        return vector2(this.x + other.x, this.y + other.y)\n    end\n    function operator -(vector2 other) returns vector2\n        return vector2(this.x - other.x, this.y - other.y)\n    end\n    function operator -() returns vector2\n        return vector2(-this.x, -this.y)\n    end\n    function operator *(int k) returns vector2\n        return vector2(this.x * k, this.y * k)\n    end\n    function operator //(int k) returns vector2\n        return vector2(this.x // k, this.y // k)\n    end\n    function operator [](int i) returns int\n        return axis_value(\"vector2\", this.to_array(), i)\n    end\n    # Every cell from this vector to `to`, both included: <vector2 x=0 y=0>:<vector2 x=1 y=1> is\n    # [<vector2 x=0 y=0>, <vector2 x=0 y=1>, <vector2 x=1 y=1>].\n    function operator :(vector2 to) returns vector2[]\n        vector2[] out = []\n        for p in steps(this.to_array(), to.to_array()) do\n            out.push(vector2(p[0], p[1]))\n        end\n        return out\n    end\n\n    # Each component multiplied by the other's.\n    function scaled(vector2 other) returns vector2\n        return vector2(this.x * other.x, this.y * other.y)\n    end\n    function dot(vector2 other) returns int\n        return this.x * other.x + this.y * other.y\n    end\n    function length() returns double\n        return math.sqrt(double(this.dot(this)))\n    end\n    function length_squared() returns int\n        return this.dot(this)\n    end\n    function distance(vector2 other) returns double\n        return (other - this).length()\n    end\n    # Steps between the two along the grid (taxicab distance).\n    function manhattan(vector2 other) returns int\n        return absolute(other.x - this.x) + absolute(other.y - this.y)\n    end\n    # The largest difference on any axis: king moves on a chessboard.\n    function chebyshev(vector2 other) returns int\n        return math.max(absolute(other.x - this.x), absolute(other.y - this.y))\n    end\n    function abs() returns vector2\n        return vector2(absolute(this.x), absolute(this.y))\n    end\n    # -1, 0, or 1 on each axis: the direction of each step toward this vector.\n    function sign() returns vector2\n        return vector2(sign_of(this.x), sign_of(this.y))\n    end\n    function min(vector2 other) returns vector2\n        return vector2(math.min(this.x, other.x), math.min(this.y, other.y))\n    end\n    function max(vector2 other) returns vector2\n        return vector2(math.max(this.x, other.x), math.max(this.y, other.y))\n    end\n    function clamp(vector2 low, vector2 high) returns vector2\n        return this.max(low).min(high)\n    end\n    # The cells one step away along each axis: right, left, up, down.\n    function neighbors() returns vector2[]\n        return [this.right(), this.left(), this.up(), this.down()]\n    end\n    # A quarter turn counterclockwise (y up), around the origin.\n    function turned_left() returns vector2\n        return vector2(-this.y, this.x)\n    end\n    function turned_right() returns vector2\n        return vector2(this.y, -this.x)\n    end\n    function extend(int z = 0) returns vector3\n        return vector3(this.x, this.y, z)\n    end\n    function to_array() returns int[]\n        return [this.x, this.y]\n    end\n    function to_string() returns string\n        return \"<vector2 x={this.x} y={this.y}>\"\n    end\nend\n\n# A position or direction in 3D, in whole numbers: <vector3 x=1 y=2 z=3>. y is up, z forward.\nstruct vector3\n    int x = 0\n    int y = 0\n    int z = 0\n\n    function up(int n = 1) returns vector3\n        return vector3(this.x, this.y + n, this.z)\n    end\n    function down(int n = 1) returns vector3\n        return vector3(this.x, this.y - n, this.z)\n    end\n    function left(int n = 1) returns vector3\n        return vector3(this.x - n, this.y, this.z)\n    end\n    function right(int n = 1) returns vector3\n        return vector3(this.x + n, this.y, this.z)\n    end\n    function north(int n = 1) returns vector3\n        return this.up(n)\n    end\n    function south(int n = 1) returns vector3\n        return this.down(n)\n    end\n    function west(int n = 1) returns vector3\n        return this.left(n)\n    end\n    function east(int n = 1) returns vector3\n        return this.right(n)\n    end\n    function forward(int n = 1) returns vector3\n        return vector3(this.x, this.y, this.z + n)\n    end\n    function backward(int n = 1) returns vector3\n        return vector3(this.x, this.y, this.z - n)\n    end\n    function movex(int n = 1) returns vector3\n        return vector3(this.x + n, this.y, this.z)\n    end\n    function movey(int n = 1) returns vector3\n        return vector3(this.x, this.y + n, this.z)\n    end\n    function movez(int n = 1) returns vector3\n        return vector3(this.x, this.y, this.z + n)\n    end\n\n    function operator +(vector3 other) returns vector3\n        return vector3(this.x + other.x, this.y + other.y, this.z + other.z)\n    end\n    function operator -(vector3 other) returns vector3\n        return vector3(this.x - other.x, this.y - other.y, this.z - other.z)\n    end\n    function operator -() returns vector3\n        return vector3(-this.x, -this.y, -this.z)\n    end\n    function operator *(int k) returns vector3\n        return vector3(this.x * k, this.y * k, this.z * k)\n    end\n    function operator //(int k) returns vector3\n        return vector3(this.x // k, this.y // k, this.z // k)\n    end\n    function operator [](int i) returns int\n        return axis_value(\"vector3\", this.to_array(), i)\n    end\n    # Every cell from this vector to `to`, both included, one unit step at a time.\n    function operator :(vector3 to) returns vector3[]\n        vector3[] out = []\n        for p in steps(this.to_array(), to.to_array()) do\n            out.push(vector3(p[0], p[1], p[2]))\n        end\n        return out\n    end\n\n    function scaled(vector3 other) returns vector3\n        return vector3(this.x * other.x, this.y * other.y, this.z * other.z)\n    end\n    function dot(vector3 other) returns int\n        return this.x * other.x + this.y * other.y + this.z * other.z\n    end\n    function cross(vector3 other) returns vector3\n        return vector3(this.y * other.z - this.z * other.y, this.z * other.x - this.x * other.z,\n                       this.x * other.y - this.y * other.x)\n    end\n    function length() returns double\n        return math.sqrt(double(this.dot(this)))\n    end\n    function length_squared() returns int\n        return this.dot(this)\n    end\n    function distance(vector3 other) returns double\n        return (other - this).length()\n    end\n    function manhattan(vector3 other) returns int\n        return absolute(other.x - this.x) + absolute(other.y - this.y) + absolute(other.z - this.z)\n    end\n    function chebyshev(vector3 other) returns int\n        return math.max(absolute(other.x - this.x), absolute(other.y - this.y),\n                        absolute(other.z - this.z))\n    end\n    function abs() returns vector3\n        return vector3(absolute(this.x), absolute(this.y), absolute(this.z))\n    end\n    function sign() returns vector3\n        return vector3(sign_of(this.x), sign_of(this.y), sign_of(this.z))\n    end\n    function min(vector3 other) returns vector3\n        return vector3(math.min(this.x, other.x), math.min(this.y, other.y), math.min(this.z, other.z))\n    end\n    function max(vector3 other) returns vector3\n        return vector3(math.max(this.x, other.x), math.max(this.y, other.y), math.max(this.z, other.z))\n    end\n    function clamp(vector3 low, vector3 high) returns vector3\n        return this.max(low).min(high)\n    end\n    # The cells one step away along each axis: right, left, up, down, forward, backward.\n    function neighbors() returns vector3[]\n        return [this.right(), this.left(), this.up(), this.down(), this.forward(), this.backward()]\n    end\n    function xy() returns vector2\n        return vector2(this.x, this.y)\n    end\n    function extend(int w = 0) returns vector4\n        return vector4(this.x, this.y, this.z, w)\n    end\n    function to_array() returns int[]\n        return [this.x, this.y, this.z]\n    end\n    function to_string() returns string\n        return \"<vector3 x={this.x} y={this.y} z={this.z}>\"\n    end\nend\n\n# A position or direction in 4D, in whole numbers: <vector4 x=1 y=2 z=3 w=4>. w runs ana\n# (toward +w) and kata (toward -w).\nstruct vector4\n    int x = 0\n    int y = 0\n    int z = 0\n    int w = 0\n\n    function up(int n = 1) returns vector4\n        return vector4(this.x, this.y + n, this.z, this.w)\n    end\n    function down(int n = 1) returns vector4\n        return vector4(this.x, this.y - n, this.z, this.w)\n    end\n    function left(int n = 1) returns vector4\n        return vector4(this.x - n, this.y, this.z, this.w)\n    end\n    function right(int n = 1) returns vector4\n        return vector4(this.x + n, this.y, this.z, this.w)\n    end\n    function north(int n = 1) returns vector4\n        return this.up(n)\n    end\n    function south(int n = 1) returns vector4\n        return this.down(n)\n    end\n    function west(int n = 1) returns vector4\n        return this.left(n)\n    end\n    function east(int n = 1) returns vector4\n        return this.right(n)\n    end\n    function forward(int n = 1) returns vector4\n        return vector4(this.x, this.y, this.z + n, this.w)\n    end\n    function backward(int n = 1) returns vector4\n        return vector4(this.x, this.y, this.z - n, this.w)\n    end\n    function ana(int n = 1) returns vector4\n        return vector4(this.x, this.y, this.z, this.w + n)\n    end\n    function kata(int n = 1) returns vector4\n        return vector4(this.x, this.y, this.z, this.w - n)\n    end\n    function movex(int n = 1) returns vector4\n        return vector4(this.x + n, this.y, this.z, this.w)\n    end\n    function movey(int n = 1) returns vector4\n        return vector4(this.x, this.y + n, this.z, this.w)\n    end\n    function movez(int n = 1) returns vector4\n        return vector4(this.x, this.y, this.z + n, this.w)\n    end\n    function movew(int n = 1) returns vector4\n        return vector4(this.x, this.y, this.z, this.w + n)\n    end\n\n    function operator +(vector4 other) returns vector4\n        return vector4(this.x + other.x, this.y + other.y, this.z + other.z, this.w + other.w)\n    end\n    function operator -(vector4 other) returns vector4\n        return vector4(this.x - other.x, this.y - other.y, this.z - other.z, this.w - other.w)\n    end\n    function operator -() returns vector4\n        return vector4(-this.x, -this.y, -this.z, -this.w)\n    end\n    function operator *(int k) returns vector4\n        return vector4(this.x * k, this.y * k, this.z * k, this.w * k)\n    end\n    function operator //(int k) returns vector4\n        return vector4(this.x // k, this.y // k, this.z // k, this.w // k)\n    end\n    function operator [](int i) returns int\n        return axis_value(\"vector4\", this.to_array(), i)\n    end\n    # Every cell from this vector to `to`, both included, one unit step at a time.\n    function operator :(vector4 to) returns vector4[]\n        vector4[] out = []\n        for p in steps(this.to_array(), to.to_array()) do\n            out.push(vector4(p[0], p[1], p[2], p[3]))\n        end\n        return out\n    end\n\n    function scaled(vector4 other) returns vector4\n        return vector4(this.x * other.x, this.y * other.y, this.z * other.z, this.w * other.w)\n    end\n    function dot(vector4 other) returns int\n        return this.x * other.x + this.y * other.y + this.z * other.z + this.w * other.w\n    end\n    function length() returns double\n        return math.sqrt(double(this.dot(this)))\n    end\n    function length_squared() returns int\n        return this.dot(this)\n    end\n    function distance(vector4 other) returns double\n        return (other - this).length()\n    end\n    function manhattan(vector4 other) returns int\n        return absolute(other.x - this.x) + absolute(other.y - this.y) + absolute(other.z - this.z) +\n               absolute(other.w - this.w)\n    end\n    function chebyshev(vector4 other) returns int\n        return math.max(absolute(other.x - this.x), absolute(other.y - this.y),\n                        absolute(other.z - this.z), absolute(other.w - this.w))\n    end\n    function abs() returns vector4\n        return vector4(absolute(this.x), absolute(this.y), absolute(this.z), absolute(this.w))\n    end\n    function sign() returns vector4\n        return vector4(sign_of(this.x), sign_of(this.y), sign_of(this.z), sign_of(this.w))\n    end\n    function min(vector4 other) returns vector4\n        return vector4(math.min(this.x, other.x), math.min(this.y, other.y), math.min(this.z, other.z),\n                       math.min(this.w, other.w))\n    end\n    function max(vector4 other) returns vector4\n        return vector4(math.max(this.x, other.x), math.max(this.y, other.y), math.max(this.z, other.z),\n                       math.max(this.w, other.w))\n    end\n    function clamp(vector4 low, vector4 high) returns vector4\n        return this.max(low).min(high)\n    end\n    # The cells one step away along each axis: right, left, up, down, forward, backward, ana, kata.\n    function neighbors() returns vector4[]\n        return [this.right(), this.left(), this.up(), this.down(), this.forward(), this.backward(),\n                this.ana(), this.kata()]\n    end\n    function xy() returns vector2\n        return vector2(this.x, this.y)\n    end\n    function xyz() returns vector3\n        return vector3(this.x, this.y, this.z)\n    end\n    function to_array() returns int[]\n        return [this.x, this.y, this.z, this.w]\n    end\n    function to_string() returns string\n        return \"<vector4 x={this.x} y={this.y} z={this.z} w={this.w}>\"\n    end\nend\n\n# Walks a slice's numbers for `for i in a:b`.\nprivate class SliceSteps\n    int at\n    int stop\n    int step\n    function next() returns int?\n        if (this.step > 0 and this.at >= this.stop) or (this.step < 0 and this.at <= this.stop) do\n            return null\n        end\n        var value = this.at\n        this.at += this.step\n        return value\n    end\nend\n\n# The numbers from start up to (not including) stop, step apart: `1:5` is 1, 2, 3, 4, and\n# `10:0:-3` is 10, 7, 4, 1. In a subscript it picks part of a string or array: \"hello\"[1:3] is\n# \"el\", xs[:2] the first two items, xs[-2:] the last two, and xs[::-1] all of them reversed.\nstruct slice\n    int start = 0\n    int stop = 0\n    int step = 1\n\n    # `a:b:step`\n    function operator :(int step) returns slice\n        if step == 0 do\n            throw ValueError(\"a slice step cannot be 0\")\n        end\n        return slice(this.start, this.stop, step)\n    end\n    function iterator() returns SliceSteps\n        if this.start == OPEN or this.stop == OPEN do\n            throw ValueError(\"a slice with an end left out has no numbers of its own; use positions(length)\")\n        end\n        return SliceSteps(this.start, this.stop, this.step)\n    end\n    # How many numbers the slice holds.\n    function length() returns int\n        if this.step > 0 and this.stop > this.start do\n            return (this.stop - this.start + this.step - 1) // this.step\n        end\n        if this.step < 0 and this.stop < this.start do\n            return (this.start - this.stop - this.step - 1) // -this.step\n        end\n        return 0\n    end\n    function contains(int n) returns bool\n        if this.step > 0 do\n            return n >= this.start and n < this.stop and (n - this.start) % this.step == 0\n        end\n        return n <= this.start and n > this.stop and (this.start - n) % -this.step == 0\n    end\n    function to_array() returns int[]\n        int[] out = []\n        for i in this do\n            out.push(i)\n        end\n        return out\n    end\n    # The indices this slice picks from a sequence of `length` items, in order. Negative ends count\n    # from the end, ends past either side are clamped, and ends left out (`xs[:3]`, `xs[::-1]`)\n    # reach the start or the end, as in Python.\n    function positions(int length) returns int[]\n        if this.step == 0 do\n            throw ValueError(\"a slice step cannot be 0\")\n        end\n        var bounds = this.bounds(length)\n        int[] out = []\n        int i = bounds[0]\n        while (this.step > 0 and i < bounds[1]) or (this.step < 0 and i > bounds[1]) do\n            out.push(i)\n            i += this.step\n        end\n        return out\n    end\n    # [first, past]: the first index and the index past the last one, for a sequence of `length`.\n    function bounds(int length) returns int[]\n        var forward = this.step > 0\n        int low = 0 if forward else -1\n        int high = length if forward else length - 1\n        int first = this.start\n        if first == OPEN do\n            first = low if forward else high\n        else if first < 0 do\n            first = math.max(first + length, low)\n        else do\n            first = math.min(first, high)\n        end\n        int past = this.stop\n        if past == OPEN do\n            past = high if forward else low\n        else if past < 0 do\n            past = math.max(past + length, low)\n        else do\n            past = math.min(past, high)\n        end\n        return [first, past]\n    end\n    function to_string() returns string\n        var from = \"\" if this.start == OPEN else \"{this.start}\"\n        var to = \"\" if this.stop == OPEN else \"{this.stop}\"\n        return \"{from}:{to}\" if this.step == 1 else \"{from}:{to}:{this.step}\"\n    end\nend\n\n# xs[a:b:step] with parts left out; the compiler and interpreters call these for subscripts.\nfunction __slice_of(int start, int stop, int step, bool open_start, bool open_stop) returns slice\n    if step == 0 do\n        throw ValueError(\"a slice step cannot be 0\")\n    end\n    return slice(OPEN if open_start else start, OPEN if open_stop else stop, step)\nend\nfunction __slice_string(string text, slice part) returns string\n    if part.step == 1 do\n        var bounds = part.bounds(text.length)\n        return text.slice(bounds[0], math.max(bounds[0], bounds[1]))\n    end\n    var out = \"\"\n    for i in part.positions(text.length) do\n        out += text[i]\n    end\n    return out\nend\nfunction __slice_array<T>(T[] items, slice part) returns T[]\n    if part.step == 1 do\n        var bounds = part.bounds(items.length)\n        return items.slice(bounds[0], math.max(bounds[0], bounds[1]))\n    end\n    T[] out = []\n    for i in part.positions(items.length) do\n        out.push(items[i])\n    end\n    return out\nend\n\n# `a ** b` with integers: checked like every integer operation, so overflow raises NumericError.\nfunction __power_int(int base, int exponent) returns int\n    if exponent < 0 do\n        throw ValueError(\"an integer power needs an exponent of 0 or more; write double({base}) ** {exponent}\")\n    end\n    int result = 1\n    int factor = base\n    int left = exponent\n    while left > 0 do\n        if left % 2 == 1 do\n            result *= factor\n        end\n        left //= 2\n        if left > 0 do\n            factor *= factor\n        end\n    end\n    return result\nend\n",
+  vecmath: "# Vectors, matrices, and quaternions for games and graphics.\n#\n#     import vecmath.*\n#     var p = Vec3(1, 2, 3) + Vec3(0, 1, 0) * 2\n#     var turn = Quat.from_axis_angle(Vec3(0, 1, 0), 90)\n#     var model = Mat4.translation(p) * turn.to_matrix()\n#\n# Every type is a struct: values are copied like numbers and cost nothing to create, so a loop\n# over thousands of positions allocates nothing. Angles are in degrees. Matrices are column-major\n# (the layout OpenGL, Vulkan, and Metal shaders read) and multiply column vectors: `a * b`\n# applies b first, then a. Vec2 uses screen conventions (y down, angles clockwise from +x);\n# Vec3 has y up.\nimport math\n\nprivate const double EPSILON = 0.000000001\nprivate const double DEGREES = math.PI / 180\n\n# A point or direction in 2D.\nstruct Vec2\n    double x = 0\n    double y = 0\n\n    function operator +(Vec2 other) returns Vec2\n        return Vec2(this.x + other.x, this.y + other.y)\n    end\n    function operator -(Vec2 other) returns Vec2\n        return Vec2(this.x - other.x, this.y - other.y)\n    end\n    function operator *(double k) returns Vec2\n        return Vec2(this.x * k, this.y * k)\n    end\n    function operator /(double k) returns Vec2\n        return Vec2(this.x / k, this.y / k)\n    end\n    function operator -() returns Vec2\n        return Vec2(-this.x, -this.y)\n    end\n    function length() returns double\n        return math.sqrt(this.x * this.x + this.y * this.y)\n    end\n    function length_squared() returns double\n        return this.x * this.x + this.y * this.y\n    end\n    # The same direction with length 1 (a zero vector stays zero).\n    function normalized() returns Vec2\n        var size = this.length()\n        if size < EPSILON do\n            return Vec2(0, 0)\n        end\n        return Vec2(this.x / size, this.y / size)\n    end\n    function dot(Vec2 other) returns double\n        return this.x * other.x + this.y * other.y\n    end\n    # The z of the 3D cross product: positive when `other` is clockwise from this (y down).\n    function cross(Vec2 other) returns double\n        return this.x * other.y - this.y * other.x\n    end\n    function distance(Vec2 other) returns double\n        return (this - other).length()\n    end\n    # The angle of the vector in degrees, clockwise from +x (y points down).\n    function angle() returns double\n        return math.atan2(this.y, this.x) / DEGREES\n    end\n    function rotated(double degrees) returns Vec2\n        var a = degrees * DEGREES\n        var c = math.cos(a)\n        var s = math.sin(a)\n        return Vec2(this.x * c - this.y * s, this.x * s + this.y * c)\n    end\n    # The vector turned a quarter clockwise.\n    function perpendicular() returns Vec2\n        return Vec2(-this.y, this.x)\n    end\n    # Bounced off a surface with this unit normal.\n    function reflected(Vec2 normal) returns Vec2\n        return this - normal * (2 * this.dot(normal))\n    end\n    # Each component multiplied by the other's.\n    function scaled(Vec2 other) returns Vec2\n        return Vec2(this.x * other.x, this.y * other.y)\n    end\n    function lerp(Vec2 to, double t) returns Vec2\n        return Vec2(this.x + (to.x - this.x) * t, this.y + (to.y - this.y) * t)\n    end\n    # At most `step` closer to `to`.\n    function toward(Vec2 to, double step) returns Vec2\n        var delta = to - this\n        var distance = delta.length()\n        if distance <= step or distance < EPSILON do\n            return to\n        end\n        return this + delta * (step / distance)\n    end\n    # The vector cut down to at most `limit` long.\n    function limited(double limit) returns Vec2\n        var size = this.length()\n        if size <= limit or size < EPSILON do\n            return this\n        end\n        return this * (limit / size)\n    end\n    function extend(double z) returns Vec3\n        return Vec3(this.x, this.y, z)\n    end\n    # The unit vector at an angle in degrees.\n    static function from_angle(double degrees) returns Vec2\n        var a = degrees * DEGREES\n        return Vec2(math.cos(a), math.sin(a))\n    end\nend\n\n# A point or direction in 3D (y is up).\nstruct Vec3\n    double x = 0\n    double y = 0\n    double z = 0\n\n    function operator +(Vec3 other) returns Vec3\n        return Vec3(this.x + other.x, this.y + other.y, this.z + other.z)\n    end\n    function operator -(Vec3 other) returns Vec3\n        return Vec3(this.x - other.x, this.y - other.y, this.z - other.z)\n    end\n    function operator *(double k) returns Vec3\n        return Vec3(this.x * k, this.y * k, this.z * k)\n    end\n    function operator /(double k) returns Vec3\n        return Vec3(this.x / k, this.y / k, this.z / k)\n    end\n    function operator -() returns Vec3\n        return Vec3(-this.x, -this.y, -this.z)\n    end\n    function length() returns double\n        return math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z)\n    end\n    function length_squared() returns double\n        return this.x * this.x + this.y * this.y + this.z * this.z\n    end\n    function normalized() returns Vec3\n        var size = this.length()\n        if size < EPSILON do\n            return Vec3(0, 0, 0)\n        end\n        return Vec3(this.x / size, this.y / size, this.z / size)\n    end\n    function dot(Vec3 other) returns double\n        return this.x * other.x + this.y * other.y + this.z * other.z\n    end\n    function cross(Vec3 other) returns Vec3\n        return Vec3(this.y * other.z - this.z * other.y, this.z * other.x - this.x * other.z,\n            this.x * other.y - this.y * other.x)\n    end\n    function distance(Vec3 other) returns double\n        return (this - other).length()\n    end\n    function reflected(Vec3 normal) returns Vec3\n        return this - normal * (2 * this.dot(normal))\n    end\n    function scaled(Vec3 other) returns Vec3\n        return Vec3(this.x * other.x, this.y * other.y, this.z * other.z)\n    end\n    function lerp(Vec3 to, double t) returns Vec3\n        return Vec3(this.x + (to.x - this.x) * t, this.y + (to.y - this.y) * t,\n            this.z + (to.z - this.z) * t)\n    end\n    function toward(Vec3 to, double step) returns Vec3\n        var delta = to - this\n        var distance = delta.length()\n        if distance <= step or distance < EPSILON do\n            return to\n        end\n        return this + delta * (step / distance)\n    end\n    function limited(double limit) returns Vec3\n        var size = this.length()\n        if size <= limit or size < EPSILON do\n            return this\n        end\n        return this * (limit / size)\n    end\n    # The angle between two directions, in degrees.\n    function angle_to(Vec3 other) returns double\n        var sizes = this.length() * other.length()\n        if sizes < EPSILON do\n            return 0\n        end\n        return math.acos(math.clamp(this.dot(other) / sizes, -1.0, 1.0)) / DEGREES\n    end\n    function xy() returns Vec2\n        return Vec2(this.x, this.y)\n    end\n    function extend(double w) returns Vec4\n        return Vec4(this.x, this.y, this.z, w)\n    end\nend\n\n# Four components: a point (w = 1) or direction (w = 0) for a Mat4, or a color.\nstruct Vec4\n    double x = 0\n    double y = 0\n    double z = 0\n    double w = 0\n\n    function operator +(Vec4 other) returns Vec4\n        return Vec4(this.x + other.x, this.y + other.y, this.z + other.z, this.w + other.w)\n    end\n    function operator -(Vec4 other) returns Vec4\n        return Vec4(this.x - other.x, this.y - other.y, this.z - other.z, this.w - other.w)\n    end\n    function operator *(double k) returns Vec4\n        return Vec4(this.x * k, this.y * k, this.z * k, this.w * k)\n    end\n    function operator /(double k) returns Vec4\n        return Vec4(this.x / k, this.y / k, this.z / k, this.w / k)\n    end\n    function operator -() returns Vec4\n        return Vec4(-this.x, -this.y, -this.z, -this.w)\n    end\n    function dot(Vec4 other) returns double\n        return this.x * other.x + this.y * other.y + this.z * other.z + this.w * other.w\n    end\n    function length() returns double\n        return math.sqrt(this.dot(this))\n    end\n    function normalized() returns Vec4\n        var size = this.length()\n        if size < EPSILON do\n            return Vec4(0, 0, 0, 0)\n        end\n        return this / size\n    end\n    function lerp(Vec4 to, double t) returns Vec4\n        return this + (to - this) * t\n    end\n    function xyz() returns Vec3\n        return Vec3(this.x, this.y, this.z)\n    end\n    # x, y, z divided by w: a projected point.\n    function projected() returns Vec3\n        if math.abs(this.w) < EPSILON do\n            return Vec3(this.x, this.y, this.z)\n        end\n        return Vec3(this.x / this.w, this.y / this.w, this.z / this.w)\n    end\nend\n\n# A 4x4 matrix in column-major order: m0..m3 is the first column, m12..m14 the translation.\n# `Mat4()` is the identity.\nstruct Mat4\n    double m0 = 1\n    double m1 = 0\n    double m2 = 0\n    double m3 = 0\n    double m4 = 0\n    double m5 = 1\n    double m6 = 0\n    double m7 = 0\n    double m8 = 0\n    double m9 = 0\n    double m10 = 1\n    double m11 = 0\n    double m12 = 0\n    double m13 = 0\n    double m14 = 0\n    double m15 = 1\n\n    # The element at a row and column (0 to 3).\n    function at(int row, int column) returns double\n        var i = column * 4 + row\n        return [this.m0, this.m1, this.m2, this.m3, this.m4, this.m5, this.m6, this.m7, this.m8,\n            this.m9, this.m10, this.m11, this.m12, this.m13, this.m14, this.m15][i]\n    end\n    function row(int r) returns Vec4\n        return Vec4(this.at(r, 0), this.at(r, 1), this.at(r, 2), this.at(r, 3))\n    end\n    function column(int c) returns Vec4\n        return Vec4(this.at(0, c), this.at(1, c), this.at(2, c), this.at(3, c))\n    end\n    # `a * b` applies b, then a.\n    function operator *(Mat4 b) returns Mat4\n        var a = this\n        return Mat4(\n            a.m0 * b.m0 + a.m4 * b.m1 + a.m8 * b.m2 + a.m12 * b.m3,\n            a.m1 * b.m0 + a.m5 * b.m1 + a.m9 * b.m2 + a.m13 * b.m3,\n            a.m2 * b.m0 + a.m6 * b.m1 + a.m10 * b.m2 + a.m14 * b.m3,\n            a.m3 * b.m0 + a.m7 * b.m1 + a.m11 * b.m2 + a.m15 * b.m3,\n            a.m0 * b.m4 + a.m4 * b.m5 + a.m8 * b.m6 + a.m12 * b.m7,\n            a.m1 * b.m4 + a.m5 * b.m5 + a.m9 * b.m6 + a.m13 * b.m7,\n            a.m2 * b.m4 + a.m6 * b.m5 + a.m10 * b.m6 + a.m14 * b.m7,\n            a.m3 * b.m4 + a.m7 * b.m5 + a.m11 * b.m6 + a.m15 * b.m7,\n            a.m0 * b.m8 + a.m4 * b.m9 + a.m8 * b.m10 + a.m12 * b.m11,\n            a.m1 * b.m8 + a.m5 * b.m9 + a.m9 * b.m10 + a.m13 * b.m11,\n            a.m2 * b.m8 + a.m6 * b.m9 + a.m10 * b.m10 + a.m14 * b.m11,\n            a.m3 * b.m8 + a.m7 * b.m9 + a.m11 * b.m10 + a.m15 * b.m11,\n            a.m0 * b.m12 + a.m4 * b.m13 + a.m8 * b.m14 + a.m12 * b.m15,\n            a.m1 * b.m12 + a.m5 * b.m13 + a.m9 * b.m14 + a.m13 * b.m15,\n            a.m2 * b.m12 + a.m6 * b.m13 + a.m10 * b.m14 + a.m14 * b.m15,\n            a.m3 * b.m12 + a.m7 * b.m13 + a.m11 * b.m14 + a.m15 * b.m15)\n    end\n    function transform(Vec4 v) returns Vec4\n        return Vec4(this.m0 * v.x + this.m4 * v.y + this.m8 * v.z + this.m12 * v.w,\n            this.m1 * v.x + this.m5 * v.y + this.m9 * v.z + this.m13 * v.w,\n            this.m2 * v.x + this.m6 * v.y + this.m10 * v.z + this.m14 * v.w,\n            this.m3 * v.x + this.m7 * v.y + this.m11 * v.z + this.m15 * v.w)\n    end\n    # A point (w = 1), divided by the resulting w for projections.\n    function transform_point(Vec3 p) returns Vec3\n        return this.transform(Vec4(p.x, p.y, p.z, 1)).projected()\n    end\n    # A direction (w = 0): rotation and scale, no translation.\n    function transform_direction(Vec3 d) returns Vec3\n        return this.transform(Vec4(d.x, d.y, d.z, 0)).xyz()\n    end\n    function transposed() returns Mat4\n        return Mat4(this.m0, this.m4, this.m8, this.m12, this.m1, this.m5, this.m9, this.m13,\n            this.m2, this.m6, this.m10, this.m14, this.m3, this.m7, this.m11, this.m15)\n    end\n    function determinant() returns double\n        var a = this\n        var s0 = a.m0 * a.m5 - a.m4 * a.m1\n        var s1 = a.m0 * a.m9 - a.m8 * a.m1\n        var s2 = a.m0 * a.m13 - a.m12 * a.m1\n        var s3 = a.m4 * a.m9 - a.m8 * a.m5\n        var s4 = a.m4 * a.m13 - a.m12 * a.m5\n        var s5 = a.m8 * a.m13 - a.m12 * a.m9\n        var c5 = a.m10 * a.m15 - a.m14 * a.m11\n        var c4 = a.m6 * a.m15 - a.m14 * a.m7\n        var c3 = a.m6 * a.m11 - a.m10 * a.m7\n        var c2 = a.m2 * a.m15 - a.m14 * a.m3\n        var c1 = a.m2 * a.m11 - a.m10 * a.m3\n        var c0 = a.m2 * a.m7 - a.m6 * a.m3\n        return s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0\n    end\n    # The inverse; a matrix that cannot be inverted (determinant 0) raises ValueError.\n    function inverted() returns Mat4\n        var a = this\n        var s0 = a.m0 * a.m5 - a.m4 * a.m1\n        var s1 = a.m0 * a.m9 - a.m8 * a.m1\n        var s2 = a.m0 * a.m13 - a.m12 * a.m1\n        var s3 = a.m4 * a.m9 - a.m8 * a.m5\n        var s4 = a.m4 * a.m13 - a.m12 * a.m5\n        var s5 = a.m8 * a.m13 - a.m12 * a.m9\n        var c5 = a.m10 * a.m15 - a.m14 * a.m11\n        var c4 = a.m6 * a.m15 - a.m14 * a.m7\n        var c3 = a.m6 * a.m11 - a.m10 * a.m7\n        var c2 = a.m2 * a.m15 - a.m14 * a.m3\n        var c1 = a.m2 * a.m11 - a.m10 * a.m3\n        var c0 = a.m2 * a.m7 - a.m6 * a.m3\n        var det = s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0\n        if math.abs(det) < EPSILON * EPSILON do\n            throw ValueError(\"Mat4.inverted: the matrix cannot be inverted\")\n        end\n        var k = 1 / det\n        return Mat4(\n            (a.m5 * c5 - a.m9 * c4 + a.m13 * c3) * k,\n            (-a.m1 * c5 + a.m9 * c2 - a.m13 * c1) * k,\n            (a.m1 * c4 - a.m5 * c2 + a.m13 * c0) * k,\n            (-a.m1 * c3 + a.m5 * c1 - a.m9 * c0) * k,\n            (-a.m4 * c5 + a.m8 * c4 - a.m12 * c3) * k,\n            (a.m0 * c5 - a.m8 * c2 + a.m12 * c1) * k,\n            (-a.m0 * c4 + a.m4 * c2 - a.m12 * c0) * k,\n            (a.m0 * c3 - a.m4 * c1 + a.m8 * c0) * k,\n            (a.m7 * s5 - a.m11 * s4 + a.m15 * s3) * k,\n            (-a.m3 * s5 + a.m11 * s2 - a.m15 * s1) * k,\n            (a.m3 * s4 - a.m7 * s2 + a.m15 * s0) * k,\n            (-a.m3 * s3 + a.m7 * s1 - a.m11 * s0) * k,\n            (-a.m6 * s5 + a.m10 * s4 - a.m14 * s3) * k,\n            (a.m2 * s5 - a.m10 * s2 + a.m14 * s1) * k,\n            (-a.m2 * s4 + a.m6 * s2 - a.m14 * s0) * k,\n            (a.m2 * s3 - a.m6 * s1 + a.m10 * s0) * k)\n    end\n    function translated(Vec3 by) returns Mat4\n        return Mat4.translation(by) * this\n    end\n    function rotated(Vec3 axis, double degrees) returns Mat4\n        return Mat4.rotation(axis, degrees) * this\n    end\n    function scaled(Vec3 by) returns Mat4\n        return Mat4.scaling(by) * this\n    end\n    # The 16 numbers in column-major order, for uniforms and native code.\n    function values() returns double[]\n        return [this.m0, this.m1, this.m2, this.m3, this.m4, this.m5, this.m6, this.m7, this.m8,\n            this.m9, this.m10, this.m11, this.m12, this.m13, this.m14, this.m15]\n    end\n\n    static function identity() returns Mat4\n        return Mat4()\n    end\n    static function translation(Vec3 by) returns Mat4\n        return Mat4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, by.x, by.y, by.z, 1)\n    end\n    static function scaling(Vec3 by) returns Mat4\n        return Mat4(by.x, 0, 0, 0, 0, by.y, 0, 0, 0, 0, by.z, 0, 0, 0, 0, 1)\n    end\n    # A rotation by `degrees` around `axis` (counterclockwise looking down the axis).\n    static function rotation(Vec3 axis, double degrees) returns Mat4\n        var n = axis.normalized()\n        var a = degrees * DEGREES\n        var c = math.cos(a)\n        var s = math.sin(a)\n        var t = 1 - c\n        return Mat4(\n            t * n.x * n.x + c, t * n.x * n.y + s * n.z, t * n.x * n.z - s * n.y, 0,\n            t * n.x * n.y - s * n.z, t * n.y * n.y + c, t * n.y * n.z + s * n.x, 0,\n            t * n.x * n.z + s * n.y, t * n.y * n.z - s * n.x, t * n.z * n.z + c, 0,\n            0, 0, 0, 1)\n    end\n    # A perspective projection with a vertical field of view in degrees; depth maps to -1..1.\n    static function perspective(double fov, double aspect, double near, double far) returns Mat4\n        var f = 1 / math.tan(fov * DEGREES / 2)\n        var depth = near - far\n        return Mat4(f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) / depth, -1, 0, 0,\n            2 * far * near / depth, 0)\n    end\n    static function orthographic(double left, double right, double bottom, double top,\n            double near, double far) returns Mat4\n        var w = right - left\n        var h = top - bottom\n        var d = far - near\n        return Mat4(2 / w, 0, 0, 0, 0, 2 / h, 0, 0, 0, 0, -2 / d, 0, -(right + left) / w,\n            -(top + bottom) / h, -(far + near) / d, 1)\n    end\n    # A view matrix for a camera at `eye` looking at `target`.\n    static function look_at(Vec3 eye, Vec3 target, Vec3 up) returns Mat4\n        var f = (target - eye).normalized()\n        var s = f.cross(up).normalized()\n        var u = s.cross(f)\n        return Mat4(s.x, u.x, -f.x, 0, s.y, u.y, -f.y, 0, s.z, u.z, -f.z, 0, -s.dot(eye),\n            -u.dot(eye), f.dot(eye), 1)\n    end\nend\n\n# A rotation in 3D. `Quat()` is no rotation.\nstruct Quat\n    double x = 0\n    double y = 0\n    double z = 0\n    double w = 1\n\n    # `a * b` rotates by b, then by a.\n    function operator *(Quat b) returns Quat\n        var a = this\n        return Quat(a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,\n            a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,\n            a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,\n            a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z)\n    end\n    function operator -() returns Quat\n        return Quat(-this.x, -this.y, -this.z, -this.w)\n    end\n    function dot(Quat other) returns double\n        return this.x * other.x + this.y * other.y + this.z * other.z + this.w * other.w\n    end\n    function length() returns double\n        return math.sqrt(this.dot(this))\n    end\n    function normalized() returns Quat\n        var size = this.length()\n        if size < EPSILON do\n            return Quat()\n        end\n        return Quat(this.x / size, this.y / size, this.z / size, this.w / size)\n    end\n    # The opposite rotation (for a unit quaternion).\n    function conjugate() returns Quat\n        return Quat(-this.x, -this.y, -this.z, this.w)\n    end\n    function inverted() returns Quat\n        var d = this.dot(this)\n        if d < EPSILON do\n            return Quat()\n        end\n        return Quat(-this.x / d, -this.y / d, -this.z / d, this.w / d)\n    end\n    # A vector turned by this rotation.\n    function rotate(Vec3 v) returns Vec3\n        var q = Vec3(this.x, this.y, this.z)\n        var t = q.cross(v) * 2\n        return v + t * this.w + q.cross(t)\n    end\n    # The shortest-path interpolation from this rotation to `to`.\n    function slerp(Quat to, double t) returns Quat\n        var target = to\n        var cosine = this.dot(to)\n        if cosine < 0 do\n            target = -to\n            cosine = -cosine\n        end\n        if cosine > 0.9995 do\n            return Quat(this.x + (target.x - this.x) * t, this.y + (target.y - this.y) * t,\n                this.z + (target.z - this.z) * t, this.w + (target.w - this.w) * t).normalized()\n        end\n        var angle = math.acos(cosine)\n        var s = math.sin(angle)\n        var a = math.sin((1 - t) * angle) / s\n        var b = math.sin(t * angle) / s\n        return Quat(this.x * a + target.x * b, this.y * a + target.y * b,\n            this.z * a + target.z * b, this.w * a + target.w * b)\n    end\n    function to_matrix() returns Mat4\n        var q = this.normalized()\n        var xx = q.x * q.x\n        var yy = q.y * q.y\n        var zz = q.z * q.z\n        var xy = q.x * q.y\n        var xz = q.x * q.z\n        var yz = q.y * q.z\n        var wx = q.w * q.x\n        var wy = q.w * q.y\n        var wz = q.w * q.z\n        return Mat4(1 - 2 * (yy + zz), 2 * (xy + wz), 2 * (xz - wy), 0,\n            2 * (xy - wz), 1 - 2 * (xx + zz), 2 * (yz + wx), 0,\n            2 * (xz + wy), 2 * (yz - wx), 1 - 2 * (xx + yy), 0,\n            0, 0, 0, 1)\n    end\n    # The axis (unit length) and angle in degrees.\n    function axis() returns Vec3\n        var q = this.normalized()\n        var s = math.sqrt(math.max(1 - q.w * q.w, 0.0))\n        if s < EPSILON do\n            return Vec3(1, 0, 0)\n        end\n        return Vec3(q.x / s, q.y / s, q.z / s)\n    end\n    function angle() returns double\n        return 2 * math.acos(math.clamp(this.normalized().w, -1.0, 1.0)) / DEGREES\n    end\n\n    static function identity() returns Quat\n        return Quat()\n    end\n    static function from_axis_angle(Vec3 axis, double degrees) returns Quat\n        var n = axis.normalized()\n        var half = degrees * DEGREES / 2\n        var s = math.sin(half)\n        return Quat(n.x * s, n.y * s, n.z * s, math.cos(half))\n    end\n    # Turns around x (pitch), then y (yaw), then z (roll), in degrees: the rotation applied\n    # last is listed last.\n    static function from_euler(double pitch, double yaw, double roll) returns Quat\n        return Quat.from_axis_angle(Vec3(0, 0, 1), roll) * Quat.from_axis_angle(Vec3(0, 1, 0), yaw) *\n            Quat.from_axis_angle(Vec3(1, 0, 0), pitch)\n    end\n    # The rotation that turns direction `from` onto direction `to`.\n    static function between(Vec3 from, Vec3 to) returns Quat\n        var a = from.normalized()\n        var b = to.normalized()\n        var d = a.dot(b)\n        if d < -0.999999 do\n            var axis = Vec3(1, 0, 0).cross(a)\n            if axis.length() < 0.000001 do\n                axis = Vec3(0, 1, 0).cross(a)\n            end\n            return Quat.from_axis_angle(axis, 180)\n        end\n        var c = a.cross(b)\n        return Quat(c.x, c.y, c.z, 1 + d).normalized()\n    end\nend\n",
 /* END LIBRARIES */
 };
 

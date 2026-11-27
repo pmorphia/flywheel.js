@@ -3,8 +3,8 @@
 // Usage: node tools/sync-libraries.js [path/to/flywheel/stdlib/fw]
 "use strict";
 const fs = require("fs"), path = require("path");
-const dir = process.argv[2] || path.join(__dirname, "..", "..", "wednesware", "fw", "stdlib", "fw");
-const LIBRARIES = ["cogwheel", "random"];
+const dir = process.argv[2] || path.join(__dirname, "..", "..", "fw", "flywheel", "stdlib", "fw");
+const LIBRARIES = ["cogwheel", "random", "_prelude", "vecmath"];
 const file = path.join(__dirname, "..", "flywheel.js");
 const src = fs.readFileSync(file, "utf8");
 const begin = "/* BEGIN LIBRARIES */\n", end = "/* END LIBRARIES */";
