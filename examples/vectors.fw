@@ -1,4 +1,4 @@
-# Built-in vectors, slices, named arguments, and the new assignment forms (Flywheel 2.29 and 2.30).
+# Built-in vectors, slices, named arguments, and the new assignment forms (Flywheel 2.29 to 2.31).
 var spawn = <vector3 x=1 y=2 z=3>
 var goal = vector3(x=4, y=2, z=5)
 print spawn, goal, spawn == vector3(1, 2, 3)
@@ -10,9 +10,9 @@ player .= east()
 player.x++
 print player, player.manhattan(vector2()), player.neighbors().length
 
-# `a:b` walks every cell from one vector to another, both ends included.
-print <vector2 x=0 y=0>:<vector2 x=2 y=2>
-var steps = spawn:goal
+# `a..b` is a tuple of every cell from one vector to another, both ends included.
+print <vector2 x=0 y=0>..<vector2 x=2 y=2>
+var steps = spawn..goal
 print steps.length, steps[1], steps[steps.length - 1] == goal
 
 # 4D: ana and kata move along w.
