@@ -1,4 +1,4 @@
-# Built-in vectors, slices, named arguments, and the new assignment forms (Flywheel 2.29).
+# Built-in vectors, slices, named arguments, and the new assignment forms (Flywheel 2.29 and 2.30).
 var spawn = <vector3 x=1 y=2 z=3>
 var goal = vector3(x=4, y=2, z=5)
 print spawn, goal, spawn == vector3(1, 2, 3)
@@ -17,6 +17,9 @@ print steps.length, steps[1], steps[steps.length - 1] == goal
 
 # 4D: ana and kata move along w.
 print vector4().ana(3).kata().forward()
+
+# Components are doubles, and the markup can give them in order (Flywheel 2.30).
+print <vector2 1.5 -2> * 2, <vector3 44 11 {spawn.z}>, vector2(1, 1) / 4
 
 # Slices of integers: a:b counts from a up to b (not included).
 var text = "hello world"
