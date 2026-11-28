@@ -17,7 +17,7 @@
 "use strict";
 // This interpreter's version, and the Flywheel version whose semantics it follows
 // (the __version__ and __flywheel__ built-in names).
-const VERSION_NUMBER = "2.13", LANGUAGE_VERSION = "2.30";
+const VERSION_NUMBER = "2.14", LANGUAGE_VERSION = "2.31";
 
 /* =========================================================================================
  * errors and control signals
@@ -4930,7 +4930,7 @@ class Session {
   exec(source) { return this.I.run(source, "repl", true); }
 }
 
-const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, formatDiagnostic, compileReport, excerptParts, version: VERSION_NUMBER + " (beta-13) flywheel.js" };
+const api = { run, parse, Session, Interp, FwElement, FwFunc, Bound, Native, CompileError, formatDiagnostic, compileReport, excerptParts, version: VERSION_NUMBER + " (beta-14) flywheel.js" };
 root.Flywheel = api;
 if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : typeof globalThis !== "undefined" ? globalThis : this);

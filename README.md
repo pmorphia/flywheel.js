@@ -4,7 +4,7 @@ The [Flywheel](https://github.com/fwlang/flywheel) language in JavaScript. One d
 
 It powers the playground at **[flywheel.polymorphia.dev](https://flywheel.polymorphia.dev)**.
 
-The real compiler is C++ on LLVM and produces native executables. flywheel.js is a tree-walking interpreter that follows the compiler's semantics and output formatting closely enough for learning and prototyping. It is version **2.13 (beta-13)**. It supports:
+The real compiler is C++ on LLVM and produces native executables. flywheel.js is a tree-walking interpreter that follows the compiler's semantics and output formatting closely enough for learning and prototyping. It is version **2.14 (beta-14)**. It supports:
 
 - classes with `constructor`/`destructor`, `public`/`private`/`protected` and `static` members, multiple inheritance (C3 order, `super.method`, `super.Base.method`), interfaces, decorators (`memoize function f`, `register class C`), and components, including `void component Icon = ...`, used like `<br>` as `<Icon name="star">` with no closing tag
 - the built-in `vector2`, `vector3`, and `vector4` types (`vector3(1, 2, 3)`, `vector3(x=1, y=2, z=3)`, `<vector3 x=1 y=2 z=3>`, `<vector3 1 2.5 3>`; components are `double`s, Flywheel 2.30) with their moves (`up`/`north`, `forward`, `ana`, `movex(n)`, ...) and `a..b` ranges between them (a tuple; Flywheel 2.31); `slice`s (`a:b`, `a:b:step`, `text[:5]`, `xs[-2:]`, `xs[::-1]`, `operator :` and slices in `operator []`); named arguments (`f(1, step=2)`); `x .= f()` (`x = x.f()`), `x++`/`x--`, and `**`/`**=` (Flywheel 2.29)
@@ -92,7 +92,7 @@ Commands take the compiler's short aliases: `r` (run), `c` (check), `e` (export)
 | `Flywheel.parse(code, name)` | Parses only. Throws `Flywheel.CompileError` with `line` and `col`. |
 | `new Flywheel.Session(opts)` | A REPL session whose `exec(code)` keeps its variables between calls. |
 | `interp.callFromHost(fn, args)` | Calls a Flywheel function, such as an `onclick={f}` handler, after the run. It returns the error's traceback text (or passes the report to `opts.diagnostic`) or `null`. |
-| `Flywheel.version` | `"2.13 (beta-13) flywheel.js"` |
+| `Flywheel.version` | `"2.14 (beta-14) flywheel.js"` |
 
 ## Tests
 
